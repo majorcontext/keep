@@ -1,0 +1,735 @@
+# Keep -- API-Level Policy Engine for AI Agents
+
+**Product Requirements Document -- Draft v0.4**
+**Major Context -- March 2026**
+
+---
+
+## Problem
+
+API tokens are designed for humans. They grant coarse-grained access -- GitHub's `repo` scope gives full read/write to every repository; Gmail's `send` scope lets you email anyone, any time. This was fine when a human with judgment sat between the token and the action.
+
+AI agents don't have judgment. They run unsupervised, at 3am, with the same confidence whether they're doing something routine or catastrophic. The underlying APIs provide no mechanism to say "read-only on production repos" or "only email @company.com addresses during business hours." The permission boundary that humans provided implicitly now needs to be made explicit.
+
+## Solution
+
+Keep is an API-level policy engine for AI agents. It evaluates structured API calls -- operation name, parameters, payloads -- against declarative rules and returns allow, deny, or redact decisions.
+
+Keep operates at the **API layer**, not the transport layer. It doesn't see hosts, ports, or TCP connections. It sees operations and their parameters. "Send a message to #general containing @here" is a Keep concern. "Can this process connect to slack.com on port 443" is not -- that's a firewall, and Moat already handles it.
+
+This separation means Keep's policy engine is portable. The same engine and the same rules can be embedded in an MCP relay, an LLM provider gateway, or directly in agent application code as a library. Keep doesn't own the transport -- it evaluates the calls that travel over it.
+
+Keep ships as three things:
+
+- **`keep`** -- the core engine library. Loads rule files. Exports `evaluate()`. This is Keep.
+- **`keep-mcp-relay`** -- a convenience binary that imports the engine, speaks MCP, and proxies to multiple downstream MCP servers. Thin transport shell.
+- **`keep-llm-gateway`** -- a convenience binary that imports the engine, speaks HTTP, decomposes LLM message payloads into per-block calls. Thin transport shell.
+
+Rule files are pure policy -- operation names, match expressions, actions. No transport details. The convenience binaries have their own config for transport concerns (upstreams, listen ports, provider type). Library callers don't need transport config at all.
+
+**Moat** is the network layer -- isolation, firewalling, credential injection.
+**Keep** is the API layer -- operation-level policy on structured calls.
+
+### Design philosophy: Deny, audit, tune
+
+Keep does not support human-in-the-loop approval queues. Agents that hit a policy boundary are denied immediately with structured feedback. The agent can work around the problem, retry with different parameters, or fail -- just like hitting any other API error.
+
+The tuning loop is asynchronous and human-driven: audit logs capture every policy evaluation (including what would have been blocked in observation mode), and operators use that data to refine policies over time. This keeps the agent's execution loop tight and deterministic while giving humans a clear feedback mechanism that doesn't require them to be online when the agent runs.
+
+This is **harness engineering** -- the practice of shaping agent behavior through external constraints rather than prompt-level instruction. A well-configured Keep ruleset acts like guard rails on a road: the agent is free to navigate, but the boundaries are hard. When an agent hits a boundary, one of two things happens. Either it finds another way to accomplish its task -- the intended way, within policy -- or it fails. Failure is not a bug. It's a signal. That failure feeds into the audit log, a human reviews it, and the governance criteria evolve: the rule was too strict and gets relaxed, or the agent's approach was wrong and the harness worked as designed. Over time, the rules converge on the actual boundaries of safe behavior for a given agent and environment, discovered empirically rather than specified upfront.
+
+## Competitive Landscape
+
+### agentsh (Canyon Road)
+
+Execution-Layer Security. Intercepts at the syscall level -- file opens, socket connects, process spawns. Strongest where agents execute arbitrary code and spawn subprocess trees. Policy enforcement happens at the OS boundary.
+
+**Where Keep differs:** agentsh governs what happens inside a runtime at the OS layer. Keep governs what agents do at the API layer -- the semantic content of their calls, not the system calls that carry them. An agent sandboxed by agentsh can still make an overbroad API call if its token allows it. The two are complementary: agentsh for execution security, Keep for API-level policy.
+
+### Maybe Don't, AI
+
+MCP gateway proxy with CEL-based policy evaluation plus optional AI-assisted evaluation. Proxies MCP tool calls, validates CLI commands, provides structured error guidance back to agents. Ships with audit-only mode for observation before enforcement.
+
+**Where Keep differs:** Maybe Don't is an MCP gateway -- tightly coupled to one protocol and one deployment model. Keep's policy engine operates on a protocol-agnostic abstraction (operation + parameters) and can be embedded in multiple contexts: MCP relay, LLM provider gateway, or directly in agent code as a library call. The engine has no compiled-in API knowledge -- new APIs need only a YAML profile, not a code change.
+
+### Warp / IDE-level permissions
+
+Warp and similar tools (Cursor, Claude Code) implement allowlists and denylists for agent actions within their own environments. These are agent-specific, not infrastructure-level. They protect the developer from their own agent, but don't help an ops team enforce organization-wide policy across multiple agents and tool integrations.
+
+## Core Abstraction
+
+### What Keep sees
+
+Every call Keep evaluates has this shape:
+
+```
+Call {
+  operation   string            // what is being done
+  params      map[string]any    // structured parameters
+  context     Context           // metadata about who/when/where
+}
+
+Context {
+  agent_id    string            // which agent is making the call
+  user_id     string            // which human delegated access (if any)
+  timestamp   time              // when the call was made
+  scope       string            // which scope matched this call
+  direction   string            // "request" | "response" | null
+  labels      map[string]string // arbitrary key-value tags
+}
+```
+
+The integration layer populates `operation` and `params` from whatever protocol it speaks. The policy engine never sees HTTP methods, URL paths, gRPC service names, or MCP framing. It just sees this object.
+
+`direction` is context metadata, not a parameter. It tells the engine whether the call represents something going to a service (request) or coming back (response). Most integrations are request-only. The LLM gateway is bidirectional.
+
+### Rules
+
+A rule has a name, a match condition, and an action:
+
+```yaml
+- name: rule-name
+  description: "Human-readable explanation"
+  match:
+    operation: "glob-or-exact"
+    when: "expression"
+  action: deny | log | redact
+  message: "Returned to the agent on deny"
+```
+
+Rules are evaluated against every call in a scope. A call must satisfy all rules to proceed. If any rule triggers `deny`, the call is blocked. If any triggers `redact`, params are mutated before forwarding. Every evaluation produces an audit entry.
+
+### Predicates
+
+Rules are built from composable predicates:
+
+- **Temporal** -- time of day, day of week, relative to a schedule
+- **Operation** -- operation name matching (exact, glob, regex)
+- **Parameter** -- structured field inspection via dot-path, regex matching, PII/PHI pattern detection
+- **Rate** -- frequency limits over sliding windows (requires local counter store)
+- **Identity** -- which agent, which user delegated access, which role
+- **Direction** -- request vs. response (from `context.direction`)
+
+### Actions
+
+- **Deny** -- block the call, return a structured error with guidance on what would be allowed
+- **Log** -- allow the call but flag it for audit review
+- **Redact** -- allow the call but mask or strip specific fields before forwarding
+
+All actions produce audit log entries.
+
+### Scopes
+
+A scope binds a set of rules to a class of traffic. Scopes define where Keep's engine is applied. They do not define how traffic gets to Keep -- that's the integration layer's job.
+
+## Integration Points
+
+Keep's policy engine can be embedded at multiple points. Each integration translates its protocol into Keep's call shape, evaluates rules, and acts on the result.
+
+### MCP relay (`keep-mcp-relay`)
+
+A single relay process that proxies to multiple downstream MCP servers. One MCP tool call = one Keep call. Tool name becomes `operation`, tool input becomes `params`. The relay presents itself as one MCP server to the agent, multiplexing across upstreams based on its routing config.
+
+```
+                          +-- MCP --> Linear MCP Server
+                         /
+Agent -- MCP --> keep-mcp-relay --- MCP --> Slack MCP Server
+                         \
+                          +-- MCP --> GitHub MCP Server
+```
+
+The agent connects to one endpoint. The relay routes each tool call to the right upstream based on tool name or namespace, evaluates the corresponding scope's rules, and forwards or denies.
+
+### LLM provider gateway (`keep-llm-gateway`)
+
+Keep sits between the agent runtime and the LLM provider API. The agent sets its base URL to Keep (e.g., `ANTHROPIC_BASE_URL=http://localhost:8080`). Bidirectional -- filters both what the model receives and what the model wants to do.
+
+The LLM integration **decomposes** each API request/response into multiple Keep calls -- one per content block, plus one payload-level summary. This keeps rules flat: instead of navigating nested message arrays, each tool_result and each tool_use becomes its own call with flat params.
+
+**Request decomposition** (agent -> model):
+
+```
+1. { operation: "llm.request",     params: { model, system, token_estimate, ... }}
+2. { operation: "llm.tool_result", params: { tool_name, content }}
+3. { operation: "llm.tool_result", params: { tool_name, content }}
+```
+
+**Response decomposition** (model -> agent):
+
+```
+1. { operation: "llm.response",    params: { stop_reason, tool_use_count }}
+2. { operation: "llm.tool_use",    params: { name, input }}
+```
+
+Any deny blocks the whole request/response. Redactions target specific blocks and the integration patches the mutated content back into the original payload before forwarding.
+
+```
+Agent runtime --HTTP--> Keep (LLM gateway) --HTTPS--> api.anthropic.com
+```
+
+### Library
+
+Keep's core is a policy engine, not a proxy. Agent applications can import the engine directly and evaluate policy inline before making API calls. The caller constructs call objects, invokes `keep.evaluate(call)`, and handles the result.
+
+This pattern works for any agent that calls APIs directly: an email agent using the Gmail API, a data pipeline agent calling Snowflake, a DevOps agent calling Terraform Cloud. The agent author constructs call objects that describe what they're about to do and checks policy before doing it.
+
+```python
+# Inside an agent's send_email function
+call = {
+    "operation": "send_email",
+    "params": { "to": ["investor@bigfund.com"], "body": "..." },
+    "context": { "agent_id": "email-agent", "scope": "gmail-agent" }
+}
+result = keep.evaluate(call)
+if result.decision == "deny":
+    return AgentError(result.message)
+# Policy passed -- make the actual API call
+gmail.send(call.params)
+```
+
+### Moat composition
+
+Inside a Moat sandbox, Keep runs as a sidecar. Moat's network layer routes traffic to Keep transparently. Moat handles credential injection; Keep handles operation-level policy. This covers agents that don't expose configurable base URLs and provides catch-all coverage.
+
+## User Stories
+
+### US-1: Constrain GitHub access beyond token scopes
+
+**As** a platform engineer,
+**I want** to restrict an AI coding agent to read-only access on `main` and write access only on branches matching `agent/*`,
+**so that** the agent can contribute code without the risk of force-pushing to production,
+**even though** the underlying GitHub token grants full `repo` scope.
+
+**Implementation notes:** When the agent uses GitHub via MCP tools, Keep evaluates the tool call directly. When the agent shells out to `git push` directly, this bypasses the API layer entirely -- that requires Moat's tool intercept proxy or agentsh's syscall-level enforcement. Keep's domain is API calls, not CLI commands.
+
+### US-2: Time-based email restrictions
+
+**As** a team lead using an AI assistant for outbound communications,
+**I want** to prevent the agent from sending external emails outside of business hours (9am-6pm local),
+**so that** a runaway agent doesn't blast emails at 2am,
+**with** the agent receiving a clear denial so it can defer or limit to internal recipients.
+
+### US-3: Content-level messaging constraints
+
+**As** an admin of a company Slack workspace,
+**I want** to prevent an AI agent from using `@here` or `@channel` mentions, and block messages referencing sensitive topics (e.g., M&A activity, unannounced products),
+**so that** the agent can participate in channels but can't broadcast or leak sensitive context.
+
+**Implementation notes:** Slack token scopes can already restrict which channels an agent can post to. Keep's value is parameter-level filtering that tokens don't support -- inspecting message content for mention patterns, topic keywords, or other semantic constraints.
+
+### US-4: Rate limiting across integrations
+
+**As** an ops engineer,
+**I want** to set a rate limit of N API calls per hour per agent, with per-scope overrides,
+**so that** a misbehaving agent loop doesn't burn through API quotas or trigger upstream rate limits.
+
+### US-5: Content-aware parameter filtering
+
+**As** a compliance officer,
+**I want** to block any API call whose parameters contain patterns matching PII (SSNs, credit card numbers),
+**so that** an agent can't accidentally exfiltrate sensitive data through a tool integration.
+
+### US-6: Compose Keep inside a Moat run
+
+**As** a developer using Moat to sandbox agent execution,
+**I want** to add Keep rules to my Moat configuration so that credential injection and API-level policy enforcement are managed together.
+
+### US-7: Audit trail for all evaluated calls
+
+**As** a security engineer,
+**I want** a structured log of every call Keep evaluated -- the operation, agent identity, rules evaluated, and decision -- so that I can investigate incidents and demonstrate compliance.
+
+### US-8: Filter what the LLM sees
+
+**As** a developer using Claude Code in a codebase with sensitive configuration,
+**I want** Keep to redact secrets from tool results before they reach the LLM provider,
+**so that** even if the agent reads a file containing API keys, that data is masked before it hits the Anthropic API.
+
+**Implementation notes:** The LLM gateway decomposes the messages payload into per-block calls. A tool_result containing `.env` contents becomes a flat `{operation: "llm.tool_result", params: {tool_name: "bash", content: "..."}}` call. The redact-secrets rule matches on `params.content` -- no nested array navigation. The integration patches the redacted content back into the payload before forwarding.
+
+### US-9: Prevent PHI exfiltration to LLM providers
+
+**As** a healthcare startup CTO,
+**I want** to block or redact Protected Health Information (PHI) before any data is sent to the agent's LLM provider,
+**so that** we can use AI agents without risking HIPAA violations from PHI leaking into model provider infrastructure.
+
+**Implementation notes:** PHI detection is substantially harder than PII pattern matching. MRNs look like any other number, diagnosis codes require medical context, and patient names are just names. May require a dedicated detection model or DLP service integration. Likely a later milestone, but the engine must support pluggable content inspection.
+
+### US-10: Observation mode before enforcement
+
+**As** someone rolling Keep out to an existing agent workflow,
+**I want** to run Keep in audit-only mode where rules are evaluated and logged but not enforced,
+**so that** I can see what would be blocked before turning enforcement on.
+
+### US-11: Policy feedback to agents
+
+**As** an AI agent developer,
+**I want** Keep's denial responses to include structured guidance (which rule fired, what would be allowed instead),
+**so that** the agent can adjust autonomously rather than failing opaquely.
+
+### US-12: Use Keep in a custom agent application
+
+**As** a developer building an agent that calls APIs directly (not via MCP),
+**I want** to import Keep as a library and evaluate policy inline before making API calls,
+**so that** I get the same policy enforcement as MCP-based agents without needing a proxy.
+
+## Policy Language
+
+### Principles
+
+1. **Operates on operations and parameters, not transport.** Rules reference operation names and parameter fields. No HTTP methods, no URL paths, no headers. Integration layers normalize protocol-specific details before the engine sees them.
+2. **Every rule sees flat params.** MCP tool calls have flat params naturally. The LLM integration decomposes messages into per-block calls so rules stay flat there too. No rule should need to navigate nested arrays.
+3. **Profiles are sugar, not infrastructure.** A profile maps short aliases to param paths. `branch == 'main'` resolves to `params.branch == 'main'`. New APIs need a YAML file, not a code change.
+4. **Starter packs are opinions, not requirements.** Curated rule sets for common APIs, like eslint shared configs. Import and override.
+5. **Same expression language everywhere.** Temporal, content matching, rate counting, regex -- available in all scopes regardless of integration point.
+
+### Configuration
+
+Rule files and integration configs are separate. Rule files are pure policy -- the engine loads them. Integration configs are transport -- the convenience binaries load them.
+
+**Rule files (loaded by the engine):**
+
+```yaml
+# rules/linear.yaml
+scope: linear-tools
+profile: linear
+rules:
+  - name: team-allowlist
+    match:
+      operation: "create_issue"
+      when: "!(params.teamId in ['TEAM-ENG', 'TEAM-INFRA'])"
+    action: deny
+    message: "This agent may only create issues in Engineering and Infrastructure."
+
+  - name: no-auto-p0
+    match:
+      operation: "create_issue"
+      when: "params.priority == 0"
+    action: deny
+    message: "P0 issues must be created by a human. Use priority 1 or lower."
+
+  - name: no-delete
+    match:
+      operation: "delete_issue"
+    action: deny
+    message: "Issue deletion is not permitted. Archive instead."
+
+  - name: no-sensitive-content
+    match:
+      operation: "create_issue"
+      when: >
+        containsAny(params.title, ['acquisition', 'merger', 'RIF', 'layoff'])
+        || containsAny(params.description, ['acquisition', 'merger', 'RIF', 'layoff'])
+    action: deny
+    message: "Issue contains sensitive business terms. Create manually."
+```
+
+```yaml
+# rules/slack.yaml
+scope: slack-tools
+rules:
+  - name: no-broadcast-mentions
+    match:
+      operation: "send_message"
+      when: "params.text.matches('<!here>|<!channel>')"
+    action: deny
+    message: "Broadcast mentions (@here, @channel) are not permitted."
+
+  - name: no-sensitive-topics
+    match:
+      operation: "send_message"
+      when: "containsAny(params.text, ['acquisition', 'merger', 'LOI', 'term sheet'])"
+    action: deny
+    message: "Message contains sensitive business terms."
+```
+
+```yaml
+# rules/anthropic.yaml
+scope: anthropic-gateway
+rules:
+  # Request direction: what the model is about to see
+  - name: redact-secrets
+    match:
+      operation: "llm.tool_result"
+    action: redact
+    redact:
+      target: "params.content"
+      patterns:
+        - match: "AKIA[0-9A-Z]{16}"
+          replace: "[REDACTED:AWS_KEY]"
+        - match: "(?i)(password|secret|api_key|token)\\s*[=:]\\s*\\S+"
+          replace: "[REDACTED:SECRET]"
+
+  - name: block-phi
+    match:
+      operation: "llm.tool_result"
+      when: "containsPHI(params.content)"
+    action: deny
+    message: "Tool result contains potential PHI. Sanitize the data source."
+
+  - name: context-size-limit
+    match:
+      operation: "llm.request"
+      when: "params.token_estimate > 150000"
+    action: deny
+    message: "Context exceeds 150k token limit."
+
+  # Response direction: what the model wants to do
+  - name: block-destructive-bash
+    match:
+      operation: "llm.tool_use"
+      when: "params.name == 'bash' && params.input.command.matches('rm -rf|DROP TABLE|TRUNCATE')"
+    action: deny
+    message: "Destructive command blocked."
+
+  - name: tool-denylist
+    match:
+      operation: "llm.tool_use"
+      when: "params.name in ['curl', 'wget', 'nc', 'ssh']"
+    action: deny
+    message: "Networking tools are blocked in this sandbox."
+
+  - name: model-call-rate
+    match:
+      operation: "llm.request"
+      when: "rateCount('anthropic:calls:' + context.agent_id, '1h') > 200"
+    action: deny
+    message: "Rate limit exceeded. Maximum 200 model calls per hour."
+```
+
+```yaml
+# rules/gmail.yaml
+scope: gmail-agent
+rules:
+  - name: business-hours-external
+    match:
+      operation: "send_email"
+      when: >
+        !params.to.all(addr, addr.endsWith('@ourcompany.com'))
+        && !inTimeWindow('09:00', '18:00', 'America/Los_Angeles')
+    action: deny
+    message: "External emails blocked outside 9am-6pm PT."
+
+  - name: blocked-domains
+    match:
+      operation: "send_email"
+      when: "params.to.any(addr, addr.endsWith('@competitor.com') || addr.endsWith('@press.org'))"
+    action: deny
+    message: "Sending to this domain is not permitted."
+
+  - name: no-pii-in-body
+    match:
+      operation: "send_email"
+      when: "containsPII(params.body)"
+    action: deny
+    message: "Email body contains patterns matching PII."
+
+  - name: send-rate
+    match:
+      operation: "send_email"
+      when: "rateCount('gmail:send:' + context.agent_id, '1h') > 30"
+    action: deny
+    message: "Rate limit exceeded. Maximum 30 emails per hour."
+```
+
+Nothing in these files mentions upstreams, ports, or protocols. The engine loads a directory of rule files and indexes them by scope name. Any caller -- relay, gateway, library -- can evaluate against any scope.
+
+**MCP relay config (loaded by `keep-mcp-relay`):**
+
+```yaml
+# keep-mcp-relay.yaml
+listen: ":8090"
+rules_dir: "./rules"
+routes:
+  - scope: linear-tools
+    upstream: "https://mcp.linear.app/mcp"
+
+  - scope: slack-tools
+    upstream: "https://slack-mcp-server.example.com"
+
+  - scope: github-tools
+    upstream: "https://api.githubcopilot.com/mcp/"
+```
+
+One process, one listen port, multiple upstreams. The agent connects to `:8090` and sees tools from all three MCP servers. The relay routes each tool call to the right upstream based on which server registered that tool, evaluates the matching scope's rules, and forwards or denies.
+
+**LLM gateway config (loaded by `keep-llm-gateway`):**
+
+```yaml
+# keep-llm-gateway.yaml
+listen: ":8080"
+rules_dir: "./rules"
+provider: anthropic
+upstream: "https://api.anthropic.com"
+scope: anthropic-gateway
+```
+
+The agent sets `ANTHROPIC_BASE_URL=http://localhost:8080`. The gateway decomposes each request/response into per-block calls, evaluates against the `anthropic-gateway` scope, and forwards the (potentially mutated) payload.
+
+**Library callers (no transport config needed):**
+
+```python
+engine = keep.load("./rules")
+result = engine.evaluate(call, scope="gmail-agent")
+```
+
+The rule files are identical in all three cases. The Linear rules work whether they're loaded by the MCP relay, by a library caller, or by a future integration that doesn't exist yet.
+
+Note how the LLM rules look just like the MCP rules -- flat field checks against `params`. The LLM gateway's block-level decomposition makes this possible. `llm.tool_result` is as flat as `create_issue` or `send_email`.
+
+### Integration-specific normalization
+
+Each integration translates protocol details into Keep's call shape. This is the only place transport concerns appear -- and it's the integration's job, not the engine's:
+
+| Caller | How `operation` is derived | How `params` is derived | Cardinality |
+|---|---|---|---|
+| `keep-mcp-relay` | Tool name | Tool input object | 1:1 (one tool call = one Keep call) |
+| `keep-llm-gateway` | Block type prefixed with `llm.` (`llm.tool_result`, `llm.tool_use`, `llm.request`, `llm.response`) | Flat fields from each content block | N+1 per API request (one summary + one per block) |
+| Library caller | Caller provides directly | Caller provides directly | Caller controls |
+
+### Profiles
+
+A profile maps semantic aliases to parameter paths:
+
+```yaml
+# profiles/linear.yaml
+name: linear
+aliases:
+  team:         "params.teamId"
+  assignee:     "params.assigneeId"
+  priority:     "params.priority"
+  title:        "params.title"
+  description:  "params.description"
+```
+
+With a profile, `priority == 0` resolves to `params.priority == 0`. Without it, you write `params.priority` directly. Profiles add readability, not capability.
+
+### Starter Packs
+
+Pre-built rule sets. Import and override:
+
+```yaml
+# starter-packs/linear-safe-defaults.yaml
+name: linear-safe-defaults
+profile: linear
+rules:
+  - name: no-delete
+    match:
+      operation: "delete_issue"
+    action: deny
+    message: "Issue deletion is not permitted."
+
+  - name: no-auto-p0
+    match:
+      operation: "create_issue"
+      when: "priority == 0"
+    action: deny
+    message: "P0 issues must be created by a human."
+
+  - name: no-close-issues
+    match:
+      operation: "update_issue"
+      when: "params.stateId in ['done', 'cancelled']"
+    action: deny
+    message: "Agents cannot close or cancel issues."
+```
+
+Usage with overrides:
+
+```yaml
+# rules/linear.yaml
+scope: linear-tools
+profile: linear
+packs:
+  - name: linear-safe-defaults
+    overrides:
+      no-auto-p0: disabled
+      no-close-issues:
+        when: "params.stateId == 'cancelled'"
+rules:
+  - name: team-allowlist
+    match:
+      operation: "create_issue"
+      when: "!(team in ['TEAM-ENG', 'TEAM-INFRA'])"
+    action: deny
+    message: "This agent may only create issues in Engineering and Infrastructure."
+```
+
+### Expression language
+
+Shared across all scopes and integration types:
+
+**Field access:** `params.field`, `params.nested.field`, `context.agent_id`, `context.direction`
+
+**Comparison:** `==`, `!=`, `>`, `<`, `>=`, `<=`
+
+**Logic:** `&&`, `||`, `!`, `in`, parentheses
+
+**Collections:** `collection.any(item, expr)`, `collection.all(item, expr)`, `size(collection)`
+
+**String:** `matches(regex)`, `startsWith(prefix)`, `endsWith(suffix)`, `contains(substr)`
+
+**Content patterns:** `containsAny(field, [terms...])`, `containsPII(field)`, `containsPHI(field)`
+
+**Temporal:** `inTimeWindow(start, end, tz)`, `dayOfWeek()`
+
+**Rate:** `rateCount(key, window)` -- sliding window counters. Requires a local counter store (in-memory or embedded KV), not a network call. This is the one predicate that is not purely stateless.
+
+### Evaluation result
+
+What the engine returns:
+
+```
+EvalResult {
+  decision         "allow" | "deny" | "redact"
+  rule             string | null
+  message          string | null
+  mutations        []Mutation | null
+  audit            AuditEntry
+}
+```
+
+The integration layer decides what to do with this. The MCP relay returns an MCP error. The LLM gateway patches mutated content back into the payload or strips a denied block. A library caller handles it inline. The engine doesn't know or care.
+
+## Requirements
+
+### Functional
+
+**R-1: Protocol-agnostic policy engine.** Keep's core evaluates rules against a normalized call shape (operation + params + context). The engine has no knowledge of transport protocols. It loads rule files from a directory, indexes by scope name, and exports `evaluate()`. Ships as a Go library.
+
+**R-2: `keep-mcp-relay`.** A convenience binary that imports the engine, speaks MCP Streamable HTTP, and proxies to multiple downstream MCP servers from a single listen port. Routes tool calls to the correct upstream, evaluates the corresponding scope's rules, and returns MCP-formatted results. This is the launch integration.
+
+**R-3: `keep-llm-gateway`.** A convenience binary that imports the engine, accepts LLM API requests (via base URL config), decomposes each request/response into per-content-block calls, evaluates rules on each, and reassembles the (potentially mutated) payload before forwarding. Must support Anthropic messages API at launch. OpenAI-compatible as a fast follow.
+
+**R-4: Library API.** The engine is importable directly. Callers construct call objects and invoke `evaluate()`. No transport, no proxy. The library, the relay, and the gateway share the same engine, rule format, and expression language. Rule files are the same regardless of which caller loads them.
+
+**R-5: Config separation.** Rule files (pure policy) and integration configs (transport details) are distinct files. Rule files contain scope name, profile, packs, and rules. Integration configs contain listen ports, upstreams, and provider type. Library callers only need rule files.
+
+**R-6: Moat composition.** Keep must be deployable as a sidecar within a Moat sandbox. Moat routes traffic to the relay or gateway transparently. Moat config references Keep rule files. Keep respects Moat's credential injection.
+
+**R-7: Audit logging.** Every evaluated call produces a structured log entry (JSON): timestamp, agent identity, scope, operation, params summary, rules evaluated, result, action taken.
+
+**R-8: Observation mode.** `audit_only` mode per-scope: rules are evaluated and logged but calls always proceed. Default for new scopes.
+
+**R-9: Denial responses.** Denied calls return a structured error: rule name, human-readable message, optional suggestion for an allowed alternative.
+
+**R-10: Redaction.** The engine can indicate field mutations (patterns matched, replacement values). For proxy integrations (MCP, LLM), the integration applies mutations before forwarding. For library callers, the result includes mutations for the caller to apply.
+
+**R-11: Profiles and starter packs.** Field alias YAML files (profiles) and curated rule sets (starter packs) loadable from filesystem. No code changes to support new APIs.
+
+### Non-Functional
+
+**R-12: Latency.** Rule evaluation < 10ms p99. Redaction adds < 20ms p99 for regex patterns.
+
+**R-13: Availability.** Fail-open or fail-closed per scope. Default: fail-closed.
+
+**R-14: Evaluation model.** Evaluating a single rule against a single call is stateless -- no network calls, no database queries. The exception is `rateCount()`, which maintains local counters (in-memory or embedded KV). This is a deliberate tradeoff: rate limiting is too useful to omit, and local counters stay within the latency budget.
+
+**R-15: Configuration hot-reload.** Rule file changes take effect without restarting the engine, relay, or gateway.
+
+## Architecture
+
+```
+  rules/                          Config files (transport)
+  +-- linear.yaml                 +-- keep-mcp-relay.yaml
+  +-- slack.yaml                  +-- keep-llm-gateway.yaml
+  +-- anthropic.yaml
+  +-- gmail.yaml
+      |                               |               |
+      v                               v               v
+  +---------------------------------------------------+
+  |           keep (policy engine library)             |
+  |                                                    |
+  |   { operation, params, context }                   |
+  |         |                                          |
+  |   evaluate(rules) -> allow / deny / redact         |
+  |                                                    |
+  |   shared: expressions, profiles, packs, counters   |
+  +-------------------+-------------------------------+
+                       |
+         +-------------+-------------+
+         v             v             v
+  keep-mcp-relay  keep-llm-gw    Library callers
+  (1 process,     (base URL       (any language,
+   N upstreams)    gateway)        no transport)
+     |    |           |                |
+     v    v           v                v
+  Linear Slack    Anthropic       Agent code
+  MCP    MCP      API             (Gmail, etc.)
+
+                      ^
+                      | (optional)
+                +-----+------+
+                |    Moat    |  transparent routing,
+                |  Sandbox   |  credential injection,
+                |            |  network-level firewall
+                +------------+
+```
+
+The policy engine is the core. It ships as a library. `keep-mcp-relay` and `keep-llm-gateway` are thin convenience binaries -- transport shells that import the library, load their own config for routing, and call `evaluate()` on every call. Adding a new integration means writing a new shell. The engine and rule language don't change.
+
+## Milestones
+
+### M0: Policy engine + MCP relay (3-4 weeks)
+
+- `keep` engine library: rule loading, call evaluation, expression language, audit logging
+- Library API: `load(rules_dir)`, `evaluate(call, scope)`, `applyMutations(params, mutations)`
+- Rule file format: scope, profile, rules with match/when/action
+- `keep-mcp-relay`: single process, multiple upstreams, single listen port
+- Relay routing: tool calls dispatched to correct upstream by tool registration
+- Deny action with structured MCP error responses
+- JSON audit log to stdout
+- CLI: `keep validate` (check rule files), `keep test` (simulate calls against rules)
+- Linear MCP profile + starter pack as first examples
+
+### M1: LLM gateway + observation mode (3-4 weeks)
+
+- `keep-llm-gateway`: Anthropic messages API
+- Block-level decomposition (per tool_result, tool_use, request/response summary)
+- Bidirectional filtering (request + response)
+- Redact action (secret stripping, payload reassembly)
+- Observation (audit_only) mode
+- Temporal predicates, rate limiting with local counters
+- Slack MCP profile + starter pack
+
+### M2: Moat integration + library packaging (3-4 weeks)
+
+- Sidecar deployment within Moat sandbox
+- Moat config references Keep rule files and relay/gateway configs
+- Credential passthrough from Moat
+- Library packaging: Go module, Python bindings (or sidecar with local API for other languages)
+- Starter pack import/override syntax
+- GitHub MCP profile + starter pack
+
+### M3: Content inspection + production hardening
+
+- Named PII pattern library (`containsPII`)
+- PHI detection research (regex baseline vs. DLP integration vs. dedicated model)
+- OpenAI-compatible LLM gateway
+- Configuration hot-reload
+- Fail-open/fail-closed modes
+- Dashboard or structured log viewer
+
+## Open Questions
+
+1. **Policy testing.** `keep test` needs to simulate calls against rules. Input format: hand-written JSON fixtures? Recorded traffic replayed? Both?
+
+2. **Policy versioning.** Do rules need versions, rollback, and diffing? For teams, probably yes. For individual developers, overhead.
+
+3. **Multi-agent policy.** When multiple agents share a scope, do they share rules or get independent ones? The identity predicate handles this, but the configuration ergonomics matter.
+
+4. **PHI detection feasibility.** Regex catches obvious patterns but PHI is contextual. Dedicated detection model? DLP service integration (Google DLP, AWS Macie)? Latency and cost tradeoffs?
+
+5. **Defense-in-depth narrative.** Keep (API-level), Moat (network-level), agentsh (syscall-level) form a stack. How do we position and document the layering?
+
+6. **AI-assisted policy evaluation.** Maybe Don't uses an LLM for edge cases. Adds latency, cost, nondeterminism. Optional predicate, or does it undermine deny/audit/tune?
+
+7. **Profile and starter pack ecosystem.** Git repo? Bundled with releases? Registry? A single curated repo is probably the right start.
+
+8. **Library distribution.** The engine is Go-first (matches Moat). For Python/TypeScript agent developers, options: (a) language-specific bindings, (b) a sidecar binary with a local HTTP/gRPC API that any language calls over localhost, (c) both. The sidecar approach is simpler to ship but adds a network hop. Could ship Go library + sidecar at launch, add native bindings based on demand.
+
+9. **LLM decomposition edge cases.** When the engine denies one `llm.tool_use` in a response containing two tool calls, does the integration strip just that block or block the entire response? Leaning toward blocking the entire response -- partial responses create confusing agent behavior.
+
+10. **LLM provider abstraction depth.** Anthropic and OpenAI message formats differ. How deep does the provider abstraction go? Thin (just enough to find tool_use/tool_result blocks) or deep (normalized schema across providers)?
+
+11. **MCP relay routing.** With multiple upstreams behind one listen port, how does the relay route tool calls? Options: (a) connect to all upstreams at startup, build a tool-name-to-upstream routing table from tool discovery, (b) explicit tool-to-scope mapping in the relay config. Option (a) is zero-config but breaks if two upstreams register the same tool name. Option (b) is explicit but more config. Leaning toward (a) with a conflict error at startup if tool names collide.

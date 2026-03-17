@@ -1,0 +1,27 @@
+name: keep-dev
+interactive: true
+
+env:
+  ANTHROPIC_MODEL: opus
+  CLAUDE_CODE_EXPERIMENTAL_AGENT_TEAMS: 1
+
+container:
+  memory: 12192
+  cpus: 16
+
+dependencies:
+  - go@1.25.6
+  - go-extras
+  - cli-essentials
+  - git
+  - gh
+  - make
+  - claude-code
+  - node@20
+  - python
+  # - docker:dind
+
+grants:
+  - claude
+  - github
+  - ssh:github.com
