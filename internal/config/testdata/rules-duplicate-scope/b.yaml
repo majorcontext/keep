@@ -1,0 +1,5 @@
+scope: duplicate-scope
+rules:
+  - name: rule-b
+    action: deny
+    message: "Rule from file b."
