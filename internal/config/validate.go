@@ -87,14 +87,44 @@ func validateRule(i int, rule Rule) []error {
 		errs = append(errs, fmt.Errorf("rules[%d]: action %q is invalid (must be %q, %q, or %q)", i, rule.Action, ActionDeny, ActionLog, ActionRedact))
 	}
 
-	// 8. if action is redact, redact block must be present
+	// 8. if action is redact, redact block must be present and valid
 	if rule.Action == ActionRedact && rule.Redact == nil {
 		errs = append(errs, fmt.Errorf("rules[%d]: action %q requires a redact block", i, ActionRedact))
+	} else if rule.Action == ActionRedact && rule.Redact != nil {
+		errs = append(errs, validateRedact(i, rule.Redact)...)
 	}
 
 	// 11. when expression if set must be <= 2048 chars
 	if len(rule.Match.When) > maxWhenLen {
 		errs = append(errs, fmt.Errorf("rules[%d]: when expression exceeds maximum length of %d", i, maxWhenLen))
+	}
+
+	return errs
+}
+
+func validateRedact(i int, spec *RedactSpec) []error {
+	var errs []error
+
+	// target must be non-empty and a valid field path
+	if spec.Target == "" {
+		errs = append(errs, fmt.Errorf("rules[%d]: redact target is required", i))
+	} else if err := ValidateFieldPath(spec.Target); err != nil {
+		errs = append(errs, fmt.Errorf("rules[%d]: redact target %q: invalid field path: %w", i, spec.Target, err))
+	}
+
+	// patterns must be non-empty
+	if len(spec.Patterns) == 0 {
+		errs = append(errs, fmt.Errorf("rules[%d]: redact patterns must not be empty", i))
+	} else {
+		for j, p := range spec.Patterns {
+			if p.Match == "" {
+				errs = append(errs, fmt.Errorf("rules[%d]: redact patterns[%d]: match must not be empty", i, j))
+				continue
+			}
+			if _, err := regexp.Compile(p.Match); err != nil {
+				errs = append(errs, fmt.Errorf("rules[%d]: redact patterns[%d]: match %q is not a valid RE2 pattern: %w", i, j, p.Match, err))
+			}
+		}
 	}
 
 	return errs

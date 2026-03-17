@@ -144,7 +144,10 @@ func TestValidate(t *testing.T) {
 					{
 						Name:   "my-rule",
 						Action: ActionRedact,
-						Redact: &RedactSpec{Target: "response"},
+						Redact: &RedactSpec{
+							Target:   "response",
+							Patterns: []RedactPattern{{Match: `\d+`, Replace: "[NUM]"}},
+						},
 					},
 				},
 			},
@@ -263,5 +266,100 @@ func TestValidate(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func makeRedactRule(spec *RedactSpec) *RuleFile {
+	return &RuleFile{
+		Scope: "my-scope",
+		Rules: []Rule{
+			{
+				Name:   "my-rule",
+				Action: ActionRedact,
+				Redact: spec,
+			},
+		},
+	}
+}
+
+func TestValidateRedact_ValidPattern(t *testing.T) {
+	rf := makeRedactRule(&RedactSpec{
+		Target:   "params.content",
+		Patterns: []RedactPattern{{Match: `\d{4}-\d{4}`, Replace: "[REDACTED]"}},
+	})
+	if err := Validate(rf); err != nil {
+		t.Fatalf("Validate() = %v, want nil", err)
+	}
+}
+
+func TestValidateRedact_InvalidRegex(t *testing.T) {
+	rf := makeRedactRule(&RedactSpec{
+		Target:   "params.content",
+		Patterns: []RedactPattern{{Match: "(unclosed", Replace: "[REDACTED]"}},
+	})
+	err := Validate(rf)
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for invalid RE2 pattern")
+	}
+	if !strings.Contains(err.Error(), "pattern") && !strings.Contains(err.Error(), "match") {
+		t.Errorf("Validate() error = %q, want it to mention pattern or match", err.Error())
+	}
+}
+
+func TestValidateRedact_MissingTarget(t *testing.T) {
+	rf := makeRedactRule(&RedactSpec{
+		Target:   "",
+		Patterns: []RedactPattern{{Match: `\d+`, Replace: "[NUM]"}},
+	})
+	err := Validate(rf)
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for missing target")
+	}
+	if !strings.Contains(err.Error(), "target") {
+		t.Errorf("Validate() error = %q, want it to contain %q", err.Error(), "target")
+	}
+}
+
+func TestValidateRedact_EmptyPatterns(t *testing.T) {
+	rf := makeRedactRule(&RedactSpec{
+		Target:   "params.content",
+		Patterns: []RedactPattern{},
+	})
+	err := Validate(rf)
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for empty patterns")
+	}
+	if !strings.Contains(err.Error(), "pattern") {
+		t.Errorf("Validate() error = %q, want it to contain %q", err.Error(), "pattern")
+	}
+}
+
+func TestValidateRedact_MissingReplace(t *testing.T) {
+	// Replace is a string so it defaults to "". The key validation is that match is non-empty.
+	// Test that a pattern with empty match is an error.
+	rf := makeRedactRule(&RedactSpec{
+		Target:   "params.content",
+		Patterns: []RedactPattern{{Match: "", Replace: "[REDACTED]"}},
+	})
+	err := Validate(rf)
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for pattern with empty match")
+	}
+	if !strings.Contains(err.Error(), "match") {
+		t.Errorf("Validate() error = %q, want it to contain %q", err.Error(), "match")
+	}
+}
+
+func TestValidateRedact_InvalidTargetPath(t *testing.T) {
+	rf := makeRedactRule(&RedactSpec{
+		Target:   "123invalid",
+		Patterns: []RedactPattern{{Match: `\d+`, Replace: "[NUM]"}},
+	})
+	err := Validate(rf)
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for invalid field path syntax")
+	}
+	if !strings.Contains(err.Error(), "target") {
+		t.Errorf("Validate() error = %q, want it to contain %q", err.Error(), "target")
 	}
 }
