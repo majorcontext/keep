@@ -438,6 +438,24 @@ rules:
 	}
 }
 
+func TestLoadPacks_FileSizeCap(t *testing.T) {
+	dir := t.TempDir()
+	big := make([]byte, maxFileBytes+1)
+	for i := range big {
+		big[i] = 'x'
+	}
+	if err := os.WriteFile(filepath.Join(dir, "big.yaml"), big, 0644); err != nil {
+		t.Fatalf("failed to write big.yaml: %v", err)
+	}
+	_, err := LoadPacks(dir)
+	if err == nil {
+		t.Fatal("expected error for oversized file, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum") {
+		t.Errorf("expected error to mention size limit, got: %v", err)
+	}
+}
+
 func TestResolvePacks_WhenOverrideTooLong(t *testing.T) {
 	pack := &StarterPack{
 		Name: "test-pack",

@@ -9,8 +9,10 @@ import (
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 const (
-	maxNameLen = 64
-	maxWhenLen = 2048
+	maxNameLen           = 64
+	maxWhenLen           = 2048
+	maxRulesPerScope     = 500
+	maxPatternsPerRedact = 50
 )
 
 // Validate checks that rf is a well-formed rule file.
@@ -30,9 +32,11 @@ func Validate(rf *RuleFile) error {
 		}
 	}
 
-	// 3. rules is required and non-empty
+	// 3. rules is required and non-empty; must not exceed maxRulesPerScope
 	if len(rf.Rules) == 0 {
 		errs = append(errs, errors.New("rules: required and must not be empty"))
+	} else if len(rf.Rules) > maxRulesPerScope {
+		errs = append(errs, fmt.Errorf("rules: %d rules exceeds maximum of %d per scope", len(rf.Rules), maxRulesPerScope))
 	} else {
 		seen := make(map[string]bool, len(rf.Rules))
 		for i, rule := range rf.Rules {
@@ -114,9 +118,11 @@ func validateRedact(i int, spec *RedactSpec) []error {
 		errs = append(errs, fmt.Errorf("rules[%d]: redact target %q must be a params.* path", i, spec.Target))
 	}
 
-	// patterns must be non-empty
+	// patterns must be non-empty and not exceed maxPatternsPerRedact
 	if len(spec.Patterns) == 0 {
 		errs = append(errs, fmt.Errorf("rules[%d]: redact patterns must not be empty", i))
+	} else if len(spec.Patterns) > maxPatternsPerRedact {
+		errs = append(errs, fmt.Errorf("rules[%d]: redact patterns: %d patterns exceeds maximum of %d", i, len(spec.Patterns), maxPatternsPerRedact))
 	} else {
 		for j, p := range spec.Patterns {
 			if p.Match == "" {

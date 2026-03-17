@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -379,6 +380,39 @@ func TestValidateRedact_InvalidTargetPath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "target") {
 		t.Errorf("Validate() error = %q, want it to contain %q", err.Error(), "target")
+	}
+}
+
+func TestValidate_TooManyRules(t *testing.T) {
+	rules := make([]Rule, maxRulesPerScope+1)
+	for i := range rules {
+		rules[i] = Rule{Name: fmt.Sprintf("rule-%d", i), Action: ActionDeny}
+	}
+	rf := &RuleFile{Scope: "my-scope", Rules: rules}
+	err := Validate(rf)
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for too many rules")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum") {
+		t.Errorf("Validate() error = %q, want it to mention exceeds maximum", err.Error())
+	}
+}
+
+func TestValidate_TooManyPatternsPerRedact(t *testing.T) {
+	patterns := make([]RedactPattern, maxPatternsPerRedact+1)
+	for i := range patterns {
+		patterns[i] = RedactPattern{Match: `\d+`, Replace: "[NUM]"}
+	}
+	rf := makeRedactRule(&RedactSpec{
+		Target:   "params.content",
+		Patterns: patterns,
+	})
+	err := Validate(rf)
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for too many redact patterns")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum") {
+		t.Errorf("Validate() error = %q, want it to mention exceeds maximum", err.Error())
 	}
 }
 

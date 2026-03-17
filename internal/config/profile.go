@@ -75,6 +75,9 @@ func LoadProfiles(dir string) (map[string]*Profile, error) {
 		if err != nil {
 			return nil, fmt.Errorf("loadprofiles: %s: cannot read file: %w", name, err)
 		}
+		if len(data) > maxFileBytes {
+			return nil, fmt.Errorf("loadprofiles: %s: file size %d exceeds maximum of %d bytes", name, len(data), maxFileBytes)
+		}
 
 		var p Profile
 		if err := yaml.Unmarshal(data, &p); err != nil {

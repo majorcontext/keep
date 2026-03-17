@@ -9,6 +9,9 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
+// maxFileBytes is the maximum allowed size for a config file (1 MB).
+const maxFileBytes = 1 << 20
+
 // LoadPacks reads all .yaml and .yml files from dir and parses them
 // as starter packs. Returns packs indexed by name. Returns an empty map
 // if dir is empty or does not exist.
@@ -39,6 +42,9 @@ func LoadPacks(dir string) (map[string]*StarterPack, error) {
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
 			return nil, fmt.Errorf("loadpacks: %s: cannot read file: %w", name, err)
+		}
+		if len(data) > maxFileBytes {
+			return nil, fmt.Errorf("loadpacks: %s: file size %d exceeds maximum of %d bytes", name, len(data), maxFileBytes)
 		}
 
 		var sp StarterPack

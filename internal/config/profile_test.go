@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -121,6 +122,24 @@ aliases:
 	_, err := LoadProfiles(dir)
 	if err == nil {
 		t.Fatal("expected error for duplicate profile name, got nil")
+	}
+}
+
+func TestLoadProfiles_FileSizeCap(t *testing.T) {
+	dir := t.TempDir()
+	big := make([]byte, maxFileBytes+1)
+	for i := range big {
+		big[i] = 'x'
+	}
+	if err := os.WriteFile(filepath.Join(dir, "big.yaml"), big, 0644); err != nil {
+		t.Fatalf("failed to write big.yaml: %v", err)
+	}
+	_, err := LoadProfiles(dir)
+	if err == nil {
+		t.Fatal("expected error for oversized file, got nil")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum") {
+		t.Errorf("expected error to mention size limit, got: %v", err)
 	}
 }
 

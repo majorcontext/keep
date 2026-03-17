@@ -11,7 +11,8 @@ import (
 
 // LoadResult holds all parsed and resolved configuration.
 type LoadResult struct {
-	// Scopes maps scope name to its rule file.
+	// Scopes contains the raw parsed rule files before pack resolution.
+	// Use ResolvedRules for the authoritative post-resolution rule list.
 	Scopes map[string]*RuleFile
 
 	// ResolvedRules maps scope name to the merged rule list (packs + inline).
@@ -128,6 +129,10 @@ func LoadRules(dir string) (map[string]*RuleFile, error) {
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("loadrules: %s: cannot read file: %w", name, err))
+			continue
+		}
+		if len(data) > maxFileBytes {
+			errs = append(errs, fmt.Errorf("loadrules: %s: file size %d exceeds maximum of %d bytes", name, len(data), maxFileBytes))
 			continue
 		}
 
