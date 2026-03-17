@@ -1,0 +1,5 @@
+name: linear
+aliases:
+  team: "params.teamId"
+  priority: "params.priority"
+  title: "params.title"

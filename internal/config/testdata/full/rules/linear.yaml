@@ -1,0 +1,14 @@
+scope: linear-tools
+mode: enforce
+profile: linear
+packs:
+  - name: linear-safe-defaults
+    overrides:
+      no-auto-p0: disabled
+rules:
+  - name: team-allowlist
+    match:
+      operation: "create_issue"
+      when: "!(params.teamId in ['TEAM-ENG', 'TEAM-INFRA'])"
+    action: deny
+    message: "This agent may only create issues in Engineering and Infrastructure."
