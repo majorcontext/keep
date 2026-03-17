@@ -1,0 +1,20 @@
+name: linear-safe-defaults
+profile: linear
+rules:
+  - name: no-delete
+    match:
+      operation: "delete_issue"
+    action: deny
+    message: "Issue deletion is not permitted."
+  - name: no-auto-p0
+    match:
+      operation: "create_issue"
+      when: "params.priority == 0"
+    action: deny
+    message: "P0 issues must be created by a human."
+  - name: no-close-issues
+    match:
+      operation: "update_issue"
+      when: "params.stateId in ['done', 'cancelled']"
+    action: deny
+    message: "Agents cannot close or cancel issues."
