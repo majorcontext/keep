@@ -113,7 +113,11 @@ func ResolvePacks(rf *RuleFile, packs map[string]*StarterPack) ([]Rule, error) {
 						if !ok {
 							return nil, fmt.Errorf("resolvepacks: pack %q: rule %q: override field %q must be a string", ref.Name, ruleName, field)
 						}
-						rules[idx].Action = Action(s)
+						a := Action(s)
+						if a != ActionDeny && a != ActionLog && a != ActionRedact {
+							return nil, fmt.Errorf("resolvepacks: pack %q: rule %q: override action %q is invalid (must be %q, %q, or %q)", ref.Name, ruleName, s, ActionDeny, ActionLog, ActionRedact)
+						}
+						rules[idx].Action = a
 					case "name", "operation":
 						return nil, fmt.Errorf("resolvepacks: pack %q: rule %q: cannot override field %q", ref.Name, ruleName, field)
 					default:

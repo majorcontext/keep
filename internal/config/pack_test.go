@@ -254,6 +254,116 @@ func TestResolvePacks_UnknownPackRef(t *testing.T) {
 	}
 }
 
+func TestResolvePacks_InvalidOverrideAction(t *testing.T) {
+	pack := &StarterPack{
+		Name: "test-pack",
+		Rules: []Rule{
+			{Name: "my-rule", Match: Match{Operation: "foo"}, Action: ActionDeny},
+		},
+	}
+	packs := map[string]*StarterPack{"test-pack": pack}
+
+	rf := &RuleFile{
+		Packs: []PackRef{
+			{
+				Name: "test-pack",
+				Overrides: map[string]interface{}{
+					"my-rule": map[string]interface{}{
+						"action": "block",
+					},
+				},
+			},
+		},
+	}
+
+	_, err := ResolvePacks(rf, packs)
+	if err == nil {
+		t.Fatal("expected error for invalid override action, got nil")
+	}
+}
+
+func TestResolvePacks_CannotOverrideName(t *testing.T) {
+	pack := &StarterPack{
+		Name: "test-pack",
+		Rules: []Rule{
+			{Name: "my-rule", Match: Match{Operation: "foo"}, Action: ActionDeny},
+		},
+	}
+	packs := map[string]*StarterPack{"test-pack": pack}
+
+	rf := &RuleFile{
+		Packs: []PackRef{
+			{
+				Name: "test-pack",
+				Overrides: map[string]interface{}{
+					"my-rule": map[string]interface{}{
+						"name": "new-name",
+					},
+				},
+			},
+		},
+	}
+
+	_, err := ResolvePacks(rf, packs)
+	if err == nil {
+		t.Fatal("expected error for overriding name, got nil")
+	}
+}
+
+func TestResolvePacks_CannotOverrideOperation(t *testing.T) {
+	pack := &StarterPack{
+		Name: "test-pack",
+		Rules: []Rule{
+			{Name: "my-rule", Match: Match{Operation: "foo"}, Action: ActionDeny},
+		},
+	}
+	packs := map[string]*StarterPack{"test-pack": pack}
+
+	rf := &RuleFile{
+		Packs: []PackRef{
+			{
+				Name: "test-pack",
+				Overrides: map[string]interface{}{
+					"my-rule": map[string]interface{}{
+						"operation": "bar",
+					},
+				},
+			},
+		},
+	}
+
+	_, err := ResolvePacks(rf, packs)
+	if err == nil {
+		t.Fatal("expected error for overriding operation, got nil")
+	}
+}
+
+func TestResolvePacks_InvalidOverrideString(t *testing.T) {
+	pack := &StarterPack{
+		Name: "test-pack",
+		Rules: []Rule{
+			{Name: "my-rule", Match: Match{Operation: "foo"}, Action: ActionDeny},
+		},
+	}
+	packs := map[string]*StarterPack{"test-pack": pack}
+
+	rf := &RuleFile{
+		Packs: []PackRef{
+			{
+				Name: "test-pack",
+				Overrides: map[string]interface{}{
+					"my-rule": "enabled",
+				},
+			},
+		},
+	}
+
+	_, err := ResolvePacks(rf, packs)
+	if err == nil {
+		t.Fatal("expected error for invalid string override value, got nil")
+	}
+}
+
 // mapKeys is a helper to print map keys for diagnostics.
 func mapKeys(m map[string]*StarterPack) []string {
 	keys := make([]string, 0, len(m))

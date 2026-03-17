@@ -145,13 +145,31 @@ func TestValidate(t *testing.T) {
 						Name:   "my-rule",
 						Action: ActionRedact,
 						Redact: &RedactSpec{
-							Target:   "response",
+							Target:   "params.content",
 							Patterns: []RedactPattern{{Match: `\d+`, Replace: "[NUM]"}},
 						},
 					},
 				},
 			},
 			wantErr: false,
+		},
+		{
+			name: "redact target not under params is an error",
+			rf: &RuleFile{
+				Scope: "my-scope",
+				Rules: []Rule{
+					{
+						Name:   "my-rule",
+						Action: ActionRedact,
+						Redact: &RedactSpec{
+							Target:   "response",
+							Patterns: []RedactPattern{{Match: `\d+`, Replace: "[NUM]"}},
+						},
+					},
+				},
+			},
+			wantErr:     true,
+			errContains: "params",
 		},
 		{
 			name: "invalid mode value is an error",
