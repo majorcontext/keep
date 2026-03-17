@@ -381,3 +381,4 @@ func TestValidateRedact_InvalidTargetPath(t *testing.T) {
 		t.Errorf("Validate() error = %q, want it to contain %q", err.Error(), "target")
 	}
 }
+

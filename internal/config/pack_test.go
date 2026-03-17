@@ -1,6 +1,9 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -13,7 +16,7 @@ func TestLoadPacks_Valid(t *testing.T) {
 	}
 	pack, ok := packs["linear-safe-defaults"]
 	if !ok {
-		t.Fatalf("expected pack %q not found; got keys: %v", "linear-safe-defaults", mapKeys(packs))
+		t.Fatalf("expected pack %q not found; got map: %v", "linear-safe-defaults", packs)
 	}
 	if len(pack.Rules) != 3 {
 		t.Errorf("got %d rules, want 3", len(pack.Rules))
@@ -364,11 +367,105 @@ func TestResolvePacks_InvalidOverrideString(t *testing.T) {
 	}
 }
 
-// mapKeys is a helper to print map keys for diagnostics.
-func mapKeys(m map[string]*StarterPack) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
+// --- validatePack tests ---
+
+func TestValidatePack_Valid(t *testing.T) {
+	sp := &StarterPack{
+		Name: "my-pack",
+		Rules: []Rule{
+			{Name: "block-it", Action: ActionDeny, Message: "blocked"},
+		},
 	}
-	return keys
+	if err := validatePack(sp); err != nil {
+		t.Fatalf("validatePack() = %v, want nil", err)
+	}
 }
+
+func TestValidatePack_MissingName(t *testing.T) {
+	sp := &StarterPack{
+		Rules: []Rule{
+			{Name: "block-it", Action: ActionDeny},
+		},
+	}
+	if err := validatePack(sp); err == nil {
+		t.Fatal("expected error for missing pack name, got nil")
+	}
+}
+
+func TestValidatePack_InvalidRuleName(t *testing.T) {
+	sp := &StarterPack{
+		Name: "my-pack",
+		Rules: []Rule{
+			{Name: "BadName", Action: ActionDeny},
+		},
+	}
+	err := validatePack(sp)
+	if err == nil {
+		t.Fatal("expected error for invalid rule name, got nil")
+	}
+	if !strings.Contains(err.Error(), "name") {
+		t.Errorf("expected error to mention name, got: %v", err)
+	}
+}
+
+func TestValidatePack_InvalidAction(t *testing.T) {
+	sp := &StarterPack{
+		Name: "my-pack",
+		Rules: []Rule{
+			{Name: "block-it", Action: Action("block")},
+		},
+	}
+	if err := validatePack(sp); err == nil {
+		t.Fatal("expected error for invalid action, got nil")
+	}
+}
+
+func TestLoadPacks_InvalidPack(t *testing.T) {
+	dir := t.TempDir()
+	// Pack with invalid rule name
+	content := `name: bad-pack
+rules:
+  - name: "BadRule"
+    action: deny
+    message: "blocked"
+`
+	if err := os.WriteFile(filepath.Join(dir, "bad.yaml"), []byte(content), 0644); err != nil {
+		t.Fatalf("failed to write bad.yaml: %v", err)
+	}
+	_, err := LoadPacks(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid pack, got nil")
+	}
+}
+
+func TestResolvePacks_WhenOverrideTooLong(t *testing.T) {
+	pack := &StarterPack{
+		Name: "test-pack",
+		Rules: []Rule{
+			{Name: "my-rule", Match: Match{Operation: "foo"}, Action: ActionDeny},
+		},
+	}
+	packs := map[string]*StarterPack{"test-pack": pack}
+
+	rf := &RuleFile{
+		Packs: []PackRef{
+			{
+				Name: "test-pack",
+				Overrides: map[string]interface{}{
+					"my-rule": map[string]interface{}{
+						"when": strings.Repeat("x", maxWhenLen+1),
+					},
+				},
+			},
+		},
+	}
+
+	_, err := ResolvePacks(rf, packs)
+	if err == nil {
+		t.Fatal("expected error for oversized when override, got nil")
+	}
+	if !strings.Contains(err.Error(), "when") {
+		t.Errorf("expected error to mention when, got: %v", err)
+	}
+}
+

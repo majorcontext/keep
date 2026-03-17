@@ -50,7 +50,7 @@ var reservedWords = map[string]bool{
 func LoadProfiles(dir string) (map[string]*Profile, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
-		if os.IsNotExist(err) {
+		if errors.Is(err, os.ErrNotExist) {
 			return make(map[string]*Profile), nil
 		}
 		return nil, fmt.Errorf("loadprofiles: cannot read directory %q: %w", dir, err)
@@ -61,7 +61,7 @@ func LoadProfiles(dir string) (map[string]*Profile, error) {
 	seenIn := make(map[string]string)
 
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if !entry.Type().IsRegular() {
 			continue
 		}
 		name := entry.Name()

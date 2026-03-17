@@ -1,6 +1,7 @@
 package config
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -53,7 +54,26 @@ func LoadAll(rulesDir string, profilesDir string, packsDir string) (*LoadResult,
 		packs = make(map[string]*StarterPack)
 	}
 
-	// 4. Resolve packs for each scope.
+	// 4. Validate profile cross-references for rule files and packs,
+	// but only when a profiles directory was provided.
+	if profilesDir != "" {
+		for scope, rf := range scopes {
+			if rf.Profile != "" {
+				if _, ok := profiles[rf.Profile]; !ok {
+					return nil, fmt.Errorf("loadall: scope %q references profile %q which was not found", scope, rf.Profile)
+				}
+			}
+		}
+		for _, sp := range packs {
+			if sp.Profile != "" {
+				if _, ok := profiles[sp.Profile]; !ok {
+					return nil, fmt.Errorf("loadall: scope %q references profile %q which was not found", sp.Name, sp.Profile)
+				}
+			}
+		}
+	}
+
+	// 5. Resolve packs for each scope.
 	// If no packs directory was provided, skip pack resolution and use only
 	// the inline rules from each rule file.
 	resolvedRules := make(map[string][]Rule, len(scopes))
@@ -80,6 +100,7 @@ func LoadAll(rulesDir string, profilesDir string, packsDir string) (*LoadResult,
 // LoadRules reads all .yaml and .yml files from dir, parses them as
 // rule files, validates each one, and checks scope uniqueness across
 // all files. Returns the parsed files indexed by scope name.
+// Errors from all files are accumulated and returned together.
 func LoadRules(dir string) (map[string]*RuleFile, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -90,9 +111,10 @@ func LoadRules(dir string) (map[string]*RuleFile, error) {
 	// Track which file first defined each scope for error reporting.
 	seenIn := make(map[string]string)
 
+	var errs []error
 	found := 0
 	for _, entry := range entries {
-		if entry.IsDir() {
+		if !entry.Type().IsRegular() {
 			continue
 		}
 		name := entry.Name()
@@ -105,23 +127,31 @@ func LoadRules(dir string) (map[string]*RuleFile, error) {
 		fullPath := filepath.Join(dir, name)
 		data, err := os.ReadFile(fullPath)
 		if err != nil {
-			return nil, fmt.Errorf("loadrules: %s: cannot read file: %w", name, err)
+			errs = append(errs, fmt.Errorf("loadrules: %s: cannot read file: %w", name, err))
+			continue
 		}
 
 		var rf RuleFile
 		if err := yaml.Unmarshal(data, &rf); err != nil {
-			return nil, fmt.Errorf("loadrules: %s: invalid YAML: %w", name, err)
+			errs = append(errs, fmt.Errorf("loadrules: %s: invalid YAML: %w", name, err))
+			continue
 		}
 
 		if err := Validate(&rf); err != nil {
-			return nil, fmt.Errorf("loadrules: %s: %w", name, err)
+			errs = append(errs, fmt.Errorf("loadrules: %s: %w", name, err))
+			continue
 		}
 
 		if prev, dup := seenIn[rf.Scope]; dup {
-			return nil, fmt.Errorf("loadrules: %s: duplicate scope %q already defined in %s", name, rf.Scope, prev)
+			errs = append(errs, fmt.Errorf("loadrules: %s: duplicate scope %q already defined in %s", name, rf.Scope, prev))
+			continue
 		}
 		seenIn[rf.Scope] = name
 		result[rf.Scope] = &rf
+	}
+
+	if len(errs) > 0 {
+		return nil, errors.Join(errs...)
 	}
 
 	if found == 0 {

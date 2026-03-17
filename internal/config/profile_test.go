@@ -13,7 +13,7 @@ func TestLoadProfiles_Valid(t *testing.T) {
 	}
 	linear, ok := profiles["linear"]
 	if !ok {
-		t.Fatalf("expected profile %q not found; got keys: %v", "linear", profileKeys(profiles))
+		t.Fatalf("expected profile %q not found; got map: %v", "linear", profiles)
 	}
 	expectedAliases := map[string]string{
 		"team":        "params.teamId",
@@ -133,10 +133,3 @@ func writeProfileFile(t *testing.T, dir, name, content string) {
 	}
 }
 
-func profileKeys(m map[string]*Profile) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	return keys
-}

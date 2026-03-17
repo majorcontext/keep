@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -45,7 +46,7 @@ func TestLoadRules_DuplicateScope(t *testing.T) {
 	}
 	// Error should mention the duplicate scope name
 	errStr := err.Error()
-	if !contains(errStr, "duplicate-scope") {
+	if !strings.Contains(errStr, "duplicate-scope") {
 		t.Errorf("expected error to mention scope name \"duplicate-scope\", got: %s", errStr)
 	}
 }
@@ -90,15 +91,37 @@ rules:
 	}
 }
 
-// contains is a helper since strings.Contains is in strings package.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		func() bool {
-			for i := 0; i <= len(s)-len(substr); i++ {
-				if s[i:i+len(substr)] == substr {
-					return true
-				}
-			}
-			return false
-		}())
+func TestLoadRules_AccumulatesErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	// Write two invalid yaml rule files
+	bad1 := `scope: bad-scope-1
+rules:
+  - name: "BadName"
+    action: deny
+`
+	bad2 := `scope: bad-scope-2
+rules:
+  - name: "BadName2"
+    action: deny
+`
+	if err := os.WriteFile(filepath.Join(dir, "a.yaml"), []byte(bad1), 0644); err != nil {
+		t.Fatalf("failed to write a.yaml: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "b.yaml"), []byte(bad2), 0644); err != nil {
+		t.Fatalf("failed to write b.yaml: %v", err)
+	}
+
+	_, err := LoadRules(dir)
+	if err == nil {
+		t.Fatal("expected error for invalid files, got nil")
+	}
+	errStr := err.Error()
+	// Both files should be mentioned
+	if !strings.Contains(errStr, "a.yaml") {
+		t.Errorf("expected error to mention a.yaml, got: %s", errStr)
+	}
+	if !strings.Contains(errStr, "b.yaml") {
+		t.Errorf("expected error to mention b.yaml, got: %s", errStr)
+	}
 }

@@ -111,7 +111,7 @@ func validateRedact(i int, spec *RedactSpec) []error {
 	} else if err := ValidateFieldPath(spec.Target); err != nil {
 		errs = append(errs, fmt.Errorf("rules[%d]: redact target %q: invalid field path: %w", i, spec.Target, err))
 	} else if !IsParamsPath(spec.Target) {
-		errs = append(errs, fmt.Errorf("rule %d: redact target %q must be a params.* path", i, spec.Target))
+		errs = append(errs, fmt.Errorf("rules[%d]: redact target %q must be a params.* path", i, spec.Target))
 	}
 
 	// patterns must be non-empty
