@@ -1,6 +1,6 @@
 # Keep -- API-Level Policy Engine for AI Agents
 
-**Product Requirements Document -- Draft v0.4**
+**Product Requirements Document -- Draft v0.5**
 **Major Context -- March 2026**
 
 ---
@@ -138,7 +138,15 @@ Agent -- MCP --> keep-mcp-relay --- MCP --> Slack MCP Server
                           +-- MCP --> GitHub MCP Server
 ```
 
-The agent connects to one endpoint. The relay routes each tool call to the right upstream based on tool name or namespace, evaluates the corresponding scope's rules, and forwards or denies.
+The agent connects to one endpoint. The relay routes each tool call to the right upstream and evaluates the corresponding scope's rules before forwarding or denying.
+
+**Routing model:** At startup, the relay connects to all configured upstreams and performs MCP tool discovery. It builds a tool-name-to-upstream routing table from the tools each upstream advertises. If two upstreams register the same tool name, the relay fails to start with an explicit conflict error listing the colliding tool name and the two upstreams. This is the zero-config path -- no manual tool-to-scope mapping needed.
+
+The relay maps each tool name to the scope of the upstream that registered it (from the route config). When a tool call arrives, the relay looks up the tool name in the routing table, finds the upstream and scope, evaluates the scope's rules, and forwards or denies.
+
+**MCP protocol scope:** The relay implements MCP Streamable HTTP transport (the current MCP spec transport). It supports: tool discovery (`tools/list`), tool invocation (`tools/call`), and capability negotiation. It does not implement resources, prompts, or sampling -- these can be added later if needed. The relay presents a merged tool list to the agent (union of all upstream tools).
+
+**Upstream health:** If an upstream is unreachable at startup, the relay logs a warning and excludes that upstream's tools from the routing table. If an upstream becomes unreachable during operation, tool calls to that upstream return an MCP error. The relay does not retry -- the agent handles retry logic.
 
 ### LLM provider gateway (`keep-llm-gateway`)
 
@@ -183,9 +191,127 @@ call = {
 result = keep.evaluate(call)
 if result.decision == "deny":
     return AgentError(result.message)
-# Policy passed -- make the actual API call
-gmail.send(call.params)
+if result.decision == "redact":
+    # ApplyMutations returns a new map with redacted values.
+    # The caller must use the returned params, not the original.
+    call["params"] = keep.apply_mutations(call["params"], result.mutations)
+# Policy passed (allow or redact) -- make the actual API call
+gmail.send(call["params"])
 ```
+
+**Mutation contract for library callers:** The engine returns a list of `Mutation` objects, each containing the field `path`, the `replaced` value, and (for audit only) the `original` value. The caller is responsible for applying mutations. The `ApplyMutations` helper does this: it takes the original params map and the mutation list, and returns a new map with the specified field paths set to their replacement values. The original map is not modified. If a mutation targets a field path that doesn't exist in params, it is silently skipped. Library callers should not expose `Mutation.Original` to end users -- it contains the pre-redaction content.
+
+### Go API surface
+
+The engine ships as a Go module (`github.com/majorcontext/keep`). The public API:
+
+```go
+package keep
+
+// Load reads all rule files from a directory, compiles CEL expressions,
+// resolves profiles and starter packs, and returns a ready-to-evaluate engine.
+// Returns an error if any rule file fails to parse or any CEL expression
+// fails to compile.
+func Load(rulesDir string, opts ...Option) (*Engine, error)
+
+// Option configures the engine at load time.
+type Option func(*engineConfig)
+
+// WithProfilesDir sets the directory to load profile YAML files from.
+func WithProfilesDir(dir string) Option
+
+// WithPacksDir sets the directory to load starter pack YAML files from.
+func WithPacksDir(dir string) Option
+
+// Engine is the loaded policy engine. Safe for concurrent use.
+type Engine struct { /* unexported */ }
+
+// Evaluate checks a call against all rules in the named scope.
+// Returns EvalResult with the decision, matched rule (if any), and audit entry.
+// Returns an error if the scope does not exist.
+func (e *Engine) Evaluate(call Call, scope string) (EvalResult, error)
+
+// ApplyMutations applies redaction mutations to a params map, returning
+// a new map with the mutated values. The original map is not modified.
+func ApplyMutations(params map[string]any, mutations []Mutation) map[string]any
+
+// Scopes returns the names of all loaded scopes.
+func (e *Engine) Scopes() []string
+
+// Reload re-reads rule files from disk and swaps the internal rule index
+// atomically. In-flight evaluations complete against the old rules.
+// Returns an error if any file fails to parse; the old rules remain active.
+func (e *Engine) Reload() error
+
+// Call is the normalized input to the policy engine.
+type Call struct {
+    Operation string         `json:"operation"`
+    Params    map[string]any `json:"params"`
+    Context   Context        `json:"context"`
+}
+
+// Context is metadata about who is making the call and when.
+type Context struct {
+    AgentID   string            `json:"agent_id"`
+    UserID    string            `json:"user_id,omitempty"`
+    Timestamp time.Time         `json:"timestamp"`
+    Scope     string            `json:"scope"`
+    Direction string            `json:"direction,omitempty"` // "request" | "response" | ""
+    Labels    map[string]string `json:"labels,omitempty"`
+}
+
+// EvalResult is the output of a policy evaluation.
+type EvalResult struct {
+    Decision  Decision    `json:"decision"`            // "allow", "deny", or "redact"
+    Rule      string      `json:"rule,omitempty"`       // which rule fired (empty if allow)
+    Message   string      `json:"message,omitempty"`    // human/agent-readable explanation
+    Mutations []Mutation  `json:"mutations,omitempty"`  // for redact: what to change
+    Audit     AuditEntry  `json:"audit"`                // always populated
+}
+
+// Decision is the outcome of a policy evaluation.
+type Decision string
+
+const (
+    Allow  Decision = "allow"
+    Deny   Decision = "deny"
+    Redact Decision = "redact"
+)
+
+// Mutation describes a single field change from a redact action.
+type Mutation struct {
+    Path     string `json:"path"`               // field path that was mutated
+    Original string `json:"original,omitempty"`  // what was there (audit only, not returned to caller by default)
+    Replaced string `json:"replaced"`            // what it became
+}
+
+// AuditEntry is the structured log record for a single evaluation.
+type AuditEntry struct {
+    Timestamp      time.Time    `json:"timestamp"`
+    Scope          string       `json:"scope"`
+    Operation      string       `json:"operation"`
+    AgentID        string       `json:"agent_id"`
+    UserID         string       `json:"user_id,omitempty"`
+    Direction      string       `json:"direction,omitempty"`
+    Decision       Decision     `json:"decision"`
+    Rule           string       `json:"rule,omitempty"`
+    Message        string       `json:"message,omitempty"`
+    RulesEvaluated []RuleResult `json:"rules_evaluated"`
+    ParamsSummary  string       `json:"params_summary"` // truncated/hashed, not full content
+}
+
+// RuleResult records what happened when a single rule was checked.
+type RuleResult struct {
+    Name    string `json:"name"`
+    Matched bool   `json:"matched"`
+    Action  string `json:"action,omitempty"`  // only set if matched
+    Skipped bool   `json:"skipped,omitempty"` // true if operation glob didn't match
+}
+```
+
+The `AuditEntry` is always populated regardless of decision. Integration layers can serialize it to their preferred output (JSON Lines to stdout, file, or a custom sink). The engine does not write audit logs itself -- it returns them for the caller to handle. The convenience binaries (`keep-mcp-relay`, `keep-llm-gateway`) and the `keep` CLI handle log output.
+
+`Original` in `Mutation` is populated for audit purposes but should not be returned to the calling agent (it contains the pre-redaction value). Integration layers must strip this field before returning results to agents.
 
 ### Moat composition
 
@@ -504,6 +630,8 @@ aliases:
 
 With a profile, `priority == 0` resolves to `params.priority == 0`. Without it, you write `params.priority` directly. Profiles add readability, not capability.
 
+**Alias resolution scope:** Aliases resolve exclusively to `params.*` paths. They cannot target `context.*` fields -- context fields are stable across all APIs and don't benefit from aliasing. An alias like `agent: "context.agent_id"` is rejected at load time. This keeps profiles focused on their purpose: making API-specific parameter names more readable.
+
 ### Starter Packs
 
 Pre-built rule sets. Import and override:
@@ -555,6 +683,8 @@ rules:
     message: "This agent may only create issues in Engineering and Infrastructure."
 ```
 
+**Pack interaction with inline rules:** Pack rules evaluate before inline rules, and deny short-circuits. There is no "allow" action that overrides a deny. If a pack rule denies a call, inline rules never see it. To relax a pack rule, use overrides: `disabled` removes it, or replace its `when` clause with a narrower condition. This is intentional -- deny is a hard boundary, not a suggestion.
+
 ### Expression language
 
 Shared across all scopes and integration types:
@@ -591,6 +721,35 @@ EvalResult {
 
 The integration layer decides what to do with this. The MCP relay returns an MCP error. The LLM gateway patches mutated content back into the payload or strips a denied block. A library caller handles it inline. The engine doesn't know or care.
 
+### Error handling
+
+Errors fall into two categories: **load-time** (when rules are read) and **eval-time** (when a call is evaluated).
+
+**Load-time errors** are fatal. If a rule file fails to parse, a CEL expression fails to compile, a profile alias shadows a built-in, or a starter pack reference doesn't resolve, `Load()` returns an error and the engine is not created. The caller (CLI, relay, gateway) must handle this -- typically by logging the error and exiting. `keep validate` exercises the same code path. Hot-reload (`Engine.Reload()`) follows the same rule: if any file fails, the reload is rejected and the old rules remain active.
+
+**Eval-time errors** follow the scope's fail mode (R-13):
+
+| Error | Fail-closed (default) | Fail-open |
+|---|---|---|
+| CEL expression returns non-bool | Deny (with rule name and error message) | Allow (log the error in audit entry) |
+| CEL expression panics (nil access, type mismatch) | Deny | Allow (log) |
+| CEL expression exceeds 5ms timeout | Deny | Allow (log) |
+| `rateCount()` counter store unavailable | Deny | Allow (log) |
+| Unknown field path in `has()` / field access | Expression evaluates to `false` / `null` (CEL null-safety) | Same |
+| Scope not found | `Evaluate()` returns an error (not a deny -- this is a caller bug) | Same |
+
+The fail mode is per-scope, set via a new `on_error` field:
+
+```yaml
+scope: linear-tools
+mode: enforce
+on_error: closed   # "closed" (default) or "open"
+```
+
+In `audit_only` mode, eval-time errors are always logged but never enforced -- consistent with the mode's purpose. The `on_error` setting only affects behavior in `enforce` mode.
+
+When a CEL expression error triggers a deny (in fail-closed mode), the `EvalResult.Message` includes the error detail: `"Rule 'team-allowlist' evaluation error: type mismatch: got string, expected int. Call denied (fail-closed)."` This gives the agent (and the operator reviewing logs) enough information to diagnose the problem.
+
 ## Requirements
 
 ### Functional
@@ -607,7 +766,7 @@ The integration layer decides what to do with this. The MCP relay returns an MCP
 
 **R-6: Moat composition.** Keep must be deployable as a sidecar within a Moat sandbox. Moat routes traffic to the relay or gateway transparently. Moat config references Keep rule files. Keep respects Moat's credential injection.
 
-**R-7: Audit logging.** Every evaluated call produces a structured log entry (JSON): timestamp, agent identity, scope, operation, params summary, rules evaluated, result, action taken.
+**R-7: Audit logging.** Every evaluated call produces a structured log entry. The engine returns an `AuditEntry` struct (see Go API surface); the caller is responsible for serialization and output. The convenience binaries (`keep-mcp-relay`, `keep-llm-gateway`) and the `keep` CLI write JSON Lines to their configured output (stdout by default, configurable to stderr or a file path via the `log.output` field in integration configs). Each line is a single JSON object -- one `AuditEntry` per evaluation. The `params_summary` field contains a truncated representation of the params (first 256 characters of the JSON-serialized params, or a SHA-256 hash if the params contain fields targeted by redaction rules). Full params are never written to the audit log.
 
 **R-8: Observation mode.** `audit_only` mode per-scope: rules are evaluated and logged but calls always proceed. Default for new scopes.
 
@@ -624,6 +783,8 @@ The integration layer decides what to do with this. The MCP relay returns an MCP
 **R-13: Availability.** Fail-open or fail-closed per scope. Default: fail-closed.
 
 **R-14: Evaluation model.** Evaluating a single rule against a single call is stateless -- no network calls, no database queries. The exception is `rateCount()`, which maintains local counters (in-memory or embedded KV). This is a deliberate tradeoff: rate limiting is too useful to omit, and local counters stay within the latency budget.
+
+**Rate counter lifecycle:** The counter store is created per `Engine` instance. At launch, counters start at zero. Counters are in-memory for M0 -- no persistence across restarts. A restart resets all counters. Counters are keyed by the string passed to `rateCount()` (typically `"scope:action:agent_id"`). Expired entries (outside any active window) are garbage-collected periodically (every 60 seconds). The maximum window is 24 hours, so counter memory is bounded: each unique key holds at most 24 hours of timestamps. The counter store is safe for concurrent use. For M0, this is sufficient. Persistent counters (surviving restarts) are a future consideration if demand warrants it -- likely an embedded KV (bbolt or similar) behind the same interface.
 
 **R-15: Configuration hot-reload.** Rule file changes take effect without restarting the engine, relay, or gateway.
 
@@ -679,7 +840,7 @@ The policy engine is the core. It ships as a library. `keep-mcp-relay` and `keep
 - Relay routing: tool calls dispatched to correct upstream by tool registration
 - Deny action with structured MCP error responses
 - JSON audit log to stdout
-- CLI: `keep validate` (check rule files), `keep test` (simulate calls against rules)
+- CLI: `keep validate` (check rule files), `keep test` (simulate calls against rules) -- see CLI specification below
 - Linear MCP profile + starter pack as first examples
 
 ### M1: LLM gateway + observation mode (3-4 weeks)
@@ -710,26 +871,189 @@ The policy engine is the core. It ships as a library. `keep-mcp-relay` and `keep
 - Fail-open/fail-closed modes
 - Dashboard or structured log viewer
 
+## CLI Specification
+
+### `keep validate`
+
+Validates rule files, profiles, and starter packs without evaluating any calls. Catches errors before deployment.
+
+```bash
+keep validate ./rules
+keep validate ./rules --profiles ./profiles --packs ./starter-packs
+```
+
+**What it checks:**
+
+1. YAML syntax (parse all `.yaml` and `.yml` files)
+2. Required fields present (`scope` and `rules` in rule files, `name` and `aliases` in profiles, `name` and `rules` in packs)
+3. Scope name uniqueness across all loaded files
+4. Scope name format (`[a-z][a-z0-9-]*`, max 64 chars)
+5. Rule name uniqueness within each scope
+6. Rule name format (`[a-z][a-z0-9-]*`, max 64 chars)
+7. CEL expression compilation (all `when` clauses parse and type-check against the Keep environment)
+8. Redact pattern compilation (all `match` fields are valid RE2)
+9. Profile alias resolution (aliases don't shadow built-ins or `params`/`context`)
+10. Starter pack references resolve (named packs exist in the packs directory)
+11. Pack override targets exist (overridden rule names exist in the referenced pack)
+12. Field path syntax (dot-separated identifiers in `redact.target` and profile aliases)
+13. Expression size limit (max 2048 characters)
+
+**Output:**
+
+```
+$ keep validate ./rules
+rules/linear.yaml: OK (6 rules, scope: linear-tools, profile: linear)
+rules/anthropic.yaml: OK (8 rules, scope: anthropic-gateway)
+rules/slack.yaml: OK (2 rules, scope: slack-tools)
+
+3 files, 16 rules, 0 errors
+```
+
+On error:
+
+```
+$ keep validate ./rules
+rules/linear.yaml:14: CEL compilation error in rule "team-allowlist": undeclared reference to 'teamId' (did you mean 'params.teamId'?)
+rules/slack.yaml:8: invalid RE2 pattern in rule "no-broadcast": missing closing paren
+
+2 errors
+```
+
+Exit code 0 on success, 1 on validation errors, 2 on file system errors (directory not found, permission denied).
+
+### `keep test`
+
+Evaluates calls from fixture files against loaded rules. Used for policy testing -- verify that rules allow, deny, and redact the right things before deploying.
+
+```bash
+keep test ./rules --fixtures ./fixtures
+keep test ./rules --fixtures ./fixtures/linear-tests.yaml
+keep test ./rules --fixtures ./fixtures --profiles ./profiles --packs ./starter-packs
+```
+
+**Fixture file format:**
+
+Fixtures are YAML files. Each file contains a list of test cases. A test case is a call plus the expected result.
+
+```yaml
+# fixtures/linear-tests.yaml
+scope: linear-tools
+tests:
+  - name: "allow normal issue creation"
+    call:
+      operation: "create_issue"
+      params:
+        title: "Fix auth bug"
+        teamId: "TEAM-ENG"
+        priority: 1
+      context:
+        agent_id: "test-agent"
+    expect:
+      decision: allow
+
+  - name: "deny P0 creation"
+    call:
+      operation: "create_issue"
+      params:
+        title: "Outage"
+        teamId: "TEAM-ENG"
+        priority: 0
+      context:
+        agent_id: "test-agent"
+    expect:
+      decision: deny
+      rule: no-auto-p0
+
+  - name: "deny wrong team"
+    call:
+      operation: "create_issue"
+      params:
+        title: "HR task"
+        teamId: "TEAM-HR"
+        priority: 2
+      context:
+        agent_id: "test-agent"
+    expect:
+      decision: deny
+      rule: team-allowlist
+
+  - name: "redact secrets in tool result"
+    call:
+      operation: "llm.tool_result"
+      params:
+        tool_name: "bash"
+        content: "AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE"
+      context:
+        agent_id: "test-agent"
+        scope: "anthropic-gateway"
+    expect:
+      decision: redact
+      rule: redact-secrets
+      mutations:
+        - path: "params.content"
+          replaced: "AWS_ACCESS_KEY_ID=[REDACTED:AWS_KEY]"
+```
+
+Test case fields:
+
+| Field | Required | Description |
+|---|---|---|
+| `name` | yes | Human-readable test name |
+| `call.operation` | yes | Operation name |
+| `call.params` | yes | Parameters map |
+| `call.context` | no | Context fields (defaults: `agent_id: "test"`, `timestamp: now`, `scope: <file-level scope>`) |
+| `expect.decision` | yes | Expected decision: `allow`, `deny`, or `redact` |
+| `expect.rule` | no | Expected rule name that fired (if deny or redact) |
+| `expect.message` | no | Expected message substring (partial match) |
+| `expect.mutations` | no | Expected mutations (for redact; `path` and `replaced` fields checked) |
+
+The file-level `scope` field sets the default scope for all tests in that file. Individual tests can override by setting `call.context.scope`.
+
+**Output:**
+
+```
+$ keep test ./rules --fixtures ./fixtures
+fixtures/linear-tests.yaml:
+  PASS  allow normal issue creation
+  PASS  deny P0 creation
+  PASS  deny wrong team
+fixtures/anthropic-tests.yaml:
+  PASS  redact secrets in tool result
+  FAIL  block destructive bash
+        expected: deny (rule: block-destructive-bash)
+        got:      allow
+
+5 tests, 4 passed, 1 failed
+```
+
+Exit code 0 if all tests pass, 1 if any test fails, 2 on load errors (bad fixtures, bad rules).
+
+**Interaction with `audit_only` mode:** `keep test` always evaluates rules in enforce mode, regardless of the scope's `mode` setting. Tests verify policy logic, not deployment mode.
+
 ## Open Questions
 
-1. **Policy testing.** `keep test` needs to simulate calls against rules. Input format: hand-written JSON fixtures? Recorded traffic replayed? Both?
+### Resolved
 
-2. **Policy versioning.** Do rules need versions, rollback, and diffing? For teams, probably yes. For individual developers, overhead.
+1. **Policy testing.** `keep test` uses hand-written YAML fixture files. Each fixture specifies a call and the expected decision, rule, and (optionally) mutations. See the CLI Specification section above for the full format. Recorded traffic replay is a future consideration -- not needed for M0.
 
-3. **Multi-agent policy.** When multiple agents share a scope, do they share rules or get independent ones? The identity predicate handles this, but the configuration ergonomics matter.
+2. **LLM decomposition edge cases.** Resolved: block the entire response. When the engine denies any decomposed call within a request or response, the integration blocks the whole thing. Partial responses create confusing agent behavior and are harder to reason about in rules. This is documented in the LLM gateway section.
 
-4. **PHI detection feasibility.** Regex catches obvious patterns but PHI is contextual. Dedicated detection model? DLP service integration (Google DLP, AWS Macie)? Latency and cost tradeoffs?
+3. **MCP relay routing.** Resolved: auto-discovery with conflict detection. The relay connects to all upstreams at startup, performs MCP tool discovery, and builds a tool-name-to-upstream routing table. If two upstreams register the same tool name, the relay fails to start with an explicit error. See the updated MCP relay section above.
 
-5. **Defense-in-depth narrative.** Keep (API-level), Moat (network-level), agentsh (syscall-level) form a stack. How do we position and document the layering?
+### Open (not blocking M0)
 
-6. **AI-assisted policy evaluation.** Maybe Don't uses an LLM for edge cases. Adds latency, cost, nondeterminism. Optional predicate, or does it undermine deny/audit/tune?
+4. **Policy versioning.** Do rules need versions, rollback, and diffing? For teams, probably yes. For individual developers, overhead. **M0 position:** rule files are plain files on disk. Versioning is git. No built-in versioning system.
 
-7. **Profile and starter pack ecosystem.** Git repo? Bundled with releases? Registry? A single curated repo is probably the right start.
+5. **Multi-agent policy.** When multiple agents share a scope, they share rules. Per-agent behavior is expressed via `context.agent_id` in `when` clauses. **Remaining question:** should there be syntactic sugar for per-agent rule overrides, or is the CEL predicate sufficient? Deferring -- CEL predicates are sufficient for launch.
 
-8. **Library distribution.** The engine is Go-first (matches Moat). For Python/TypeScript agent developers, options: (a) language-specific bindings, (b) a sidecar binary with a local HTTP/gRPC API that any language calls over localhost, (c) both. The sidecar approach is simpler to ship but adds a network hop. Could ship Go library + sidecar at launch, add native bindings based on demand.
+6. **PHI detection feasibility.** Regex catches obvious patterns but PHI is contextual. **M0 position:** `containsPHI()` ships as a stub that always returns `false` with a log warning. Real implementation is M3. The function signature is stable so rules can be written now. **Future direction:** PHI is the strongest candidate for the LLM-as-judge predicate (see #8). Regex covers structured formats (MRN, ICD codes, labeled fields); an LLM judge could handle unstructured clinical text where pattern matching fails. A DLP service integration (Google DLP, AWS Macie) is the middle ground -- better than regex, cheaper than an LLM call, but adds a network dependency.
 
-9. **LLM decomposition edge cases.** When the engine denies one `llm.tool_use` in a response containing two tool calls, does the integration strip just that block or block the entire response? Leaning toward blocking the entire response -- partial responses create confusing agent behavior.
+7. **Defense-in-depth narrative.** Keep (API-level), Moat (network-level), agentsh (syscall-level) form a stack. **M0 position:** document the layering in Keep's docs but don't build cross-product integration until M2 (Moat composition).
 
-10. **LLM provider abstraction depth.** Anthropic and OpenAI message formats differ. How deep does the provider abstraction go? Thin (just enough to find tool_use/tool_result blocks) or deep (normalized schema across providers)?
+8. **AI-assisted policy evaluation.** **M0 position: not in scope.** Adding an LLM call to the evaluation path breaks Keep's default properties (determinism, bounded time, no network calls), so the core engine won't support it. But there are real cases -- nuanced content moderation, PHI detection in unstructured text, intent classification -- where regex and keyword matching aren't enough and operators will accept the latency/cost tradeoff. **Future goal:** a pluggable predicate interface (e.g., `llmJudge(field, prompt)`) that integrations can opt into per-scope. The predicate would be async, have its own timeout, and be explicitly marked as non-deterministic in audit logs. The engine's default path stays fast and stateless; LLM-as-judge is an opt-in extension for scopes that need it.
 
-11. **MCP relay routing.** With multiple upstreams behind one listen port, how does the relay route tool calls? Options: (a) connect to all upstreams at startup, build a tool-name-to-upstream routing table from tool discovery, (b) explicit tool-to-scope mapping in the relay config. Option (a) is zero-config but breaks if two upstreams register the same tool name. Option (b) is explicit but more config. Leaning toward (a) with a conflict error at startup if tool names collide.
+9. **Profile and starter pack ecosystem.** **M0 position:** profiles and starter packs ship in the Keep repo under `profiles/` and `starter-packs/`. A separate curated repo can come later if the ecosystem grows. For M0, bundle the Linear profile + starter pack as the first example.
+
+10. **Library distribution.** **M0 position:** Go module only. The sidecar binary (`keep-eval-server` or similar, exposing a local HTTP API) is a fast follow if Python/TypeScript demand materializes. Native language bindings are deferred. The Go library is the canonical implementation; everything else calls through it.
+
+11. **LLM provider abstraction depth.** **M1 decision (when the gateway is built):** thin abstraction. The gateway needs to find content blocks (tool_use, tool_result, text) and decompose them into Keep calls. It does not need a normalized schema across providers. Each provider gets its own decomposer (a function that takes a provider-specific request/response and emits Keep calls). Anthropic first, OpenAI second. The decomposer interface is internal -- not part of the public API.
