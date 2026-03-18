@@ -1,0 +1,299 @@
+package engine
+
+import (
+	"testing"
+	"time"
+
+	keepcel "github.com/majorcontext/keep/internal/cel"
+	"github.com/majorcontext/keep/internal/config"
+)
+
+func makeEvaluator(t *testing.T, rules []config.Rule) *Evaluator {
+	t.Helper()
+	env, err := keepcel.NewEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, err := NewEvaluator(env, "test-scope", config.ModeEnforce, config.ErrorModeClosed, rules, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ev
+}
+
+func makeCall(operation string, params map[string]any) Call {
+	return Call{
+		Operation: operation,
+		Params:    params,
+		Context: CallContext{
+			AgentID:   "agent-1",
+			UserID:    "user-1",
+			Timestamp: time.Date(2025, 1, 15, 12, 0, 0, 0, time.UTC),
+			Scope:     "test-scope",
+			Direction: "inbound",
+			Labels:    map[string]string{"env": "test"},
+		},
+	}
+}
+
+func TestEval_AllowNoRules(t *testing.T) {
+	ev := makeEvaluator(t, nil)
+	result := ev.Evaluate(makeCall("anything", nil))
+	if result.Decision != Allow {
+		t.Errorf("expected Allow, got %s", result.Decision)
+	}
+}
+
+func TestEval_DenyMatchesOperation(t *testing.T) {
+	rules := []config.Rule{
+		{
+			Name:    "block-deletes",
+			Action:  config.ActionDeny,
+			Match:   config.Match{Operation: "delete_*"},
+			Message: "deletes are not allowed",
+		},
+	}
+	ev := makeEvaluator(t, rules)
+	result := ev.Evaluate(makeCall("delete_issue", nil))
+	if result.Decision != Deny {
+		t.Errorf("expected Deny, got %s", result.Decision)
+	}
+	if result.Rule != "block-deletes" {
+		t.Errorf("expected rule block-deletes, got %s", result.Rule)
+	}
+}
+
+func TestEval_DenyMatchesWhen(t *testing.T) {
+	rules := []config.Rule{
+		{
+			Name:    "block-low-priority",
+			Action:  config.ActionDeny,
+			Match:   config.Match{When: "params.priority == 0"},
+			Message: "low priority denied",
+		},
+	}
+	ev := makeEvaluator(t, rules)
+	result := ev.Evaluate(makeCall("create_issue", map[string]any{"priority": int64(0)}))
+	if result.Decision != Deny {
+		t.Errorf("expected Deny, got %s", result.Decision)
+	}
+	if result.Rule != "block-low-priority" {
+		t.Errorf("expected rule block-low-priority, got %s", result.Rule)
+	}
+	if result.Message != "low priority denied" {
+		t.Errorf("expected message 'low priority denied', got %q", result.Message)
+	}
+}
+
+func TestEval_DenyShortCircuit(t *testing.T) {
+	rules := []config.Rule{
+		{
+			Name:   "first-deny",
+			Action: config.ActionDeny,
+			Match:  config.Match{Operation: "delete_*"},
+		},
+		{
+			Name:   "second-deny",
+			Action: config.ActionDeny,
+			Match:  config.Match{Operation: "delete_*"},
+		},
+	}
+	ev := makeEvaluator(t, rules)
+	result := ev.Evaluate(makeCall("delete_issue", nil))
+	if result.Decision != Deny {
+		t.Fatalf("expected Deny, got %s", result.Decision)
+	}
+	evaluated := result.Audit.RulesEvaluated
+	if len(evaluated) != 1 {
+		t.Fatalf("expected 1 rule evaluated, got %d", len(evaluated))
+	}
+	if !evaluated[0].Matched {
+		t.Error("expected first rule to be matched")
+	}
+	if evaluated[0].Name != "first-deny" {
+		t.Errorf("expected first-deny, got %s", evaluated[0].Name)
+	}
+}
+
+func TestEval_Log(t *testing.T) {
+	rules := []config.Rule{
+		{
+			Name:   "log-everything",
+			Action: config.ActionLog,
+			Match:  config.Match{Operation: "*"},
+		},
+	}
+	ev := makeEvaluator(t, rules)
+	result := ev.Evaluate(makeCall("create_issue", nil))
+	if result.Decision != Allow {
+		t.Errorf("expected Allow, got %s", result.Decision)
+	}
+	evaluated := result.Audit.RulesEvaluated
+	if len(evaluated) != 1 {
+		t.Fatalf("expected 1 rule evaluated, got %d", len(evaluated))
+	}
+	if !evaluated[0].Matched {
+		t.Error("expected log rule to be matched")
+	}
+	if evaluated[0].Action != "log" {
+		t.Errorf("expected action log, got %s", evaluated[0].Action)
+	}
+}
+
+func TestEval_Redact(t *testing.T) {
+	rules := []config.Rule{
+		{
+			Name:   "redact-aws",
+			Action: config.ActionRedact,
+			Match:  config.Match{Operation: "*"},
+			Redact: &config.RedactSpec{
+				Target: "params.body",
+				Patterns: []config.RedactPattern{
+					{Match: `AKIA[0-9A-Z]{16}`, Replace: "***AWS_KEY***"},
+				},
+			},
+		},
+	}
+	ev := makeEvaluator(t, rules)
+	result := ev.Evaluate(makeCall("send_message", map[string]any{
+		"body": "my key is AKIAIOSFODNN7EXAMPLE ok",
+	}))
+	if result.Decision != Redact {
+		t.Errorf("expected Redact, got %s", result.Decision)
+	}
+	if len(result.Mutations) == 0 {
+		t.Fatal("expected mutations, got none")
+	}
+	if result.Mutations[0].Path != "params.body" {
+		t.Errorf("expected mutation path params.body, got %s", result.Mutations[0].Path)
+	}
+}
+
+func TestEval_RedactAccumulates(t *testing.T) {
+	rules := []config.Rule{
+		{
+			Name:   "redact-aws",
+			Action: config.ActionRedact,
+			Match:  config.Match{Operation: "*"},
+			Redact: &config.RedactSpec{
+				Target: "params.body",
+				Patterns: []config.RedactPattern{
+					{Match: `AKIA[0-9A-Z]{16}`, Replace: "***AWS_KEY***"},
+				},
+			},
+		},
+		{
+			Name:   "redact-ssn",
+			Action: config.ActionRedact,
+			Match:  config.Match{Operation: "*"},
+			Redact: &config.RedactSpec{
+				Target: "params.notes",
+				Patterns: []config.RedactPattern{
+					{Match: `\d{3}-\d{2}-\d{4}`, Replace: "***SSN***"},
+				},
+			},
+		},
+	}
+	ev := makeEvaluator(t, rules)
+	result := ev.Evaluate(makeCall("send_message", map[string]any{
+		"body":  "my key is AKIAIOSFODNN7EXAMPLE ok",
+		"notes": "SSN is 123-45-6789",
+	}))
+	if result.Decision != Redact {
+		t.Errorf("expected Redact, got %s", result.Decision)
+	}
+	if len(result.Mutations) != 2 {
+		t.Fatalf("expected 2 mutations, got %d", len(result.Mutations))
+	}
+}
+
+func TestEval_OperationMismatch(t *testing.T) {
+	rules := []config.Rule{
+		{
+			Name:   "create-only",
+			Action: config.ActionDeny,
+			Match:  config.Match{Operation: "create_*"},
+		},
+	}
+	ev := makeEvaluator(t, rules)
+	result := ev.Evaluate(makeCall("delete_issue", nil))
+	if result.Decision != Allow {
+		t.Errorf("expected Allow, got %s", result.Decision)
+	}
+	evaluated := result.Audit.RulesEvaluated
+	if len(evaluated) != 1 {
+		t.Fatalf("expected 1 rule evaluated, got %d", len(evaluated))
+	}
+	if !evaluated[0].Skipped {
+		t.Error("expected rule to be skipped")
+	}
+}
+
+func TestEval_WhenFalse(t *testing.T) {
+	rules := []config.Rule{
+		{
+			Name:   "block-low-priority",
+			Action: config.ActionDeny,
+			Match:  config.Match{When: "params.priority == 0"},
+		},
+	}
+	ev := makeEvaluator(t, rules)
+	result := ev.Evaluate(makeCall("create_issue", map[string]any{"priority": int64(1)}))
+	if result.Decision != Allow {
+		t.Errorf("expected Allow, got %s", result.Decision)
+	}
+	evaluated := result.Audit.RulesEvaluated
+	if len(evaluated) != 1 {
+		t.Fatalf("expected 1 rule evaluated, got %d", len(evaluated))
+	}
+	if evaluated[0].Matched {
+		t.Error("expected rule to not be matched")
+	}
+}
+
+func TestEval_AuditAlwaysPopulated(t *testing.T) {
+	tests := []struct {
+		name  string
+		rules []config.Rule
+	}{
+		{"no-rules", nil},
+		{"deny-rule", []config.Rule{
+			{Name: "deny-all", Action: config.ActionDeny, Match: config.Match{Operation: "*"}},
+		}},
+		{"log-rule", []config.Rule{
+			{Name: "log-all", Action: config.ActionLog, Match: config.Match{Operation: "*"}},
+		}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ev := makeEvaluator(t, tt.rules)
+			result := ev.Evaluate(makeCall("test_op", nil))
+			audit := result.Audit
+			if audit.Timestamp.IsZero() {
+				t.Error("expected non-zero timestamp")
+			}
+			if audit.Scope != "test-scope" {
+				t.Errorf("expected scope test-scope, got %s", audit.Scope)
+			}
+			if audit.Operation != "test_op" {
+				t.Errorf("expected operation test_op, got %s", audit.Operation)
+			}
+			if audit.AgentID != "agent-1" {
+				t.Errorf("expected agent_id agent-1, got %s", audit.AgentID)
+			}
+			if audit.UserID != "user-1" {
+				t.Errorf("expected user_id user-1, got %s", audit.UserID)
+			}
+			if audit.Direction != "inbound" {
+				t.Errorf("expected direction inbound, got %s", audit.Direction)
+			}
+			if audit.Decision == "" {
+				t.Error("expected non-empty decision")
+			}
+			if audit.ParamsSummary == "" {
+				t.Error("expected non-empty params summary")
+			}
+		})
+	}
+}
