@@ -1,0 +1,8 @@
+scope: slack-tools
+rules:
+  - name: no-broadcast
+    match:
+      operation: "send_message"
+      when: "params.text.contains('@here')"
+    action: deny
+    message: "Broadcast mentions not permitted."

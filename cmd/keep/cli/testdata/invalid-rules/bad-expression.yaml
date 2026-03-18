@@ -1,0 +1,9 @@
+scope: bad-scope
+mode: enforce
+rules:
+  - name: bad-rule
+    match:
+      operation: "*"
+      when: "this is not valid CEL ==="
+    action: deny
+    message: "Should fail to compile"

@@ -1,0 +1,8 @@
+scope: linear-tools
+mode: enforce
+rules:
+  - name: no-delete
+    match:
+      operation: "delete_issue"
+    action: deny
+    message: "Issue deletion is not permitted."
