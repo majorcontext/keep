@@ -58,14 +58,20 @@ type AuditEntry struct {
 	Message        string
 	RulesEvaluated []RuleResult
 	ParamsSummary  string
+	// Enforced is true when the Decision was actually applied to the call.
+	// It is false in audit_only mode, where Decision records what would have
+	// happened but the call is allowed regardless.
+	Enforced bool
 }
 
 // RuleResult records what happened when a single rule was checked.
 type RuleResult struct {
-	Name    string
-	Matched bool
-	Action  string
-	Skipped bool
+	Name         string
+	Matched      bool
+	Action       string
+	Skipped      bool
+	Error        bool   // true if a CEL eval error occurred for this rule
+	ErrorMessage string // the CEL eval error message, populated when Error is true
 }
 
 // compiledRule pairs a parsed rule with its compiled CEL program and redact patterns.
@@ -140,6 +146,8 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 		"labels":    call.Context.Labels,
 	}
 
+	auditOnly := ev.mode == config.ModeAuditOnly
+
 	var rulesEvaluated []RuleResult
 	var mutations []redact.Mutation
 
@@ -155,14 +163,47 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 
 		// Evaluate when clause if present.
 		if cr.program != nil {
-			matched, err := cr.program.Eval(celParams, celCtx)
-			if err != nil {
-				// Treat eval error as not matched (error handling deferred to Task 10).
+			matched, evalErr := evalSafe(cr.program, celParams, celCtx)
+			if evalErr != nil {
+				errMsg := evalErr.Error()
+				// In audit_only mode, always treat errors as not-matched.
+				if auditOnly || ev.onError == config.ErrorModeOpen {
+					rulesEvaluated = append(rulesEvaluated, RuleResult{
+						Name:         cr.rule.Name,
+						Matched:      false,
+						Error:        true,
+						ErrorMessage: errMsg,
+					})
+					continue
+				}
+				// ErrorModeClosed: deny immediately.
+				msg := fmt.Sprintf("Rule %q evaluation error: %s. Call denied (fail-closed).", cr.rule.Name, errMsg)
 				rulesEvaluated = append(rulesEvaluated, RuleResult{
-					Name:    cr.rule.Name,
-					Matched: false,
+					Name:         cr.rule.Name,
+					Matched:      false,
+					Error:        true,
+					ErrorMessage: errMsg,
 				})
-				continue
+				decision := Deny
+				return EvalResult{
+					Decision: decision,
+					Rule:     cr.rule.Name,
+					Message:  msg,
+					Audit: AuditEntry{
+						Timestamp:      call.Context.Timestamp,
+						Scope:          ev.scope,
+						Operation:      call.Operation,
+						AgentID:        call.Context.AgentID,
+						UserID:         call.Context.UserID,
+						Direction:      call.Context.Direction,
+						Decision:       decision,
+						Rule:           cr.rule.Name,
+						Message:        msg,
+						RulesEvaluated: rulesEvaluated,
+						ParamsSummary:  paramsSummary(celParams),
+						Enforced:       true,
+					},
+				}
 			}
 			if !matched {
 				rulesEvaluated = append(rulesEvaluated, RuleResult{
@@ -183,10 +224,19 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 		switch cr.rule.Action {
 		case config.ActionDeny:
 			decision := Deny
+			auditDecision := decision
+			enforced := true
+			returnDecision := decision
+			returnMessage := cr.rule.Message
+
+			if auditOnly {
+				// Record what would have happened but don't enforce.
+				enforced = false
+				returnDecision = Allow
+			}
+
 			result := EvalResult{
-				Decision: decision,
-				Rule:     cr.rule.Name,
-				Message:  cr.rule.Message,
+				Decision: returnDecision,
 				Audit: AuditEntry{
 					Timestamp:      call.Context.Timestamp,
 					Scope:          ev.scope,
@@ -194,13 +244,21 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 					AgentID:        call.Context.AgentID,
 					UserID:         call.Context.UserID,
 					Direction:      call.Context.Direction,
-					Decision:       decision,
+					Decision:       auditDecision,
 					Rule:           cr.rule.Name,
-					Message:        cr.rule.Message,
+					Message:        returnMessage,
 					RulesEvaluated: rulesEvaluated,
 					ParamsSummary:  paramsSummary(celParams),
+					Enforced:       enforced,
 				},
 			}
+			if !auditOnly {
+				result.Rule = cr.rule.Name
+				result.Message = cr.rule.Message
+				return result
+			}
+			// In audit_only mode: continue accumulating rules but track deny match.
+			// We return the first deny match's audit info at the end.
 			return result
 
 		case config.ActionLog:
@@ -208,7 +266,7 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 			continue
 
 		case config.ActionRedact:
-			if cr.rule.Redact != nil {
+			if cr.rule.Redact != nil && !auditOnly {
 				m := redact.Apply(call.Params, cr.rule.Redact.Target, cr.patterns)
 				mutations = append(mutations, m...)
 			}
@@ -216,14 +274,25 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 	}
 
 	// After all rules.
-	decision := Allow
+	// In audit_only mode, mutations are never applied and the decision is always Allow.
+	auditDecision := Allow
+	returnDecision := Allow
 	if len(mutations) > 0 {
-		decision = Redact
+		auditDecision = Redact
+		if !auditOnly {
+			returnDecision = Redact
+		}
+	}
+
+	enforced := !auditOnly
+	returnMutations := mutations
+	if auditOnly {
+		returnMutations = nil
 	}
 
 	return EvalResult{
-		Decision:  decision,
-		Mutations: mutations,
+		Decision:  returnDecision,
+		Mutations: returnMutations,
 		Audit: AuditEntry{
 			Timestamp:      call.Context.Timestamp,
 			Scope:          ev.scope,
@@ -231,11 +300,24 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 			AgentID:        call.Context.AgentID,
 			UserID:         call.Context.UserID,
 			Direction:      call.Context.Direction,
-			Decision:       decision,
+			Decision:       auditDecision,
 			RulesEvaluated: rulesEvaluated,
 			ParamsSummary:  paramsSummary(celParams),
+			Enforced:       enforced,
 		},
 	}
+}
+
+// evalSafe wraps program evaluation to recover from panics.
+// Returns the boolean result and any error.
+func evalSafe(prog *keepcel.Program, params map[string]any, ctx map[string]any) (result bool, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			result = false
+			err = fmt.Errorf("CEL eval panic: %v", r)
+		}
+	}()
+	return prog.Eval(params, ctx)
 }
 
 // paramsSummary returns a JSON-serialized summary of params, truncated to 256 chars.
