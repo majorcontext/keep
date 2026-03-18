@@ -320,7 +320,17 @@ func buildRequestBlockMap(req *anthropic.MessagesRequest, cfg gwconfig.Decompose
 
 // copyResponseHeaders copies relevant headers from an upstream response to the client.
 func copyResponseHeaders(w http.ResponseWriter, resp *http.Response) {
-	for _, h := range []string{"Content-Type", "X-Request-Id"} {
+	for _, h := range []string{
+		"Content-Type",
+		"X-Request-Id",
+		"retry-after",
+		"anthropic-ratelimit-requests-limit",
+		"anthropic-ratelimit-requests-remaining",
+		"anthropic-ratelimit-requests-reset",
+		"anthropic-ratelimit-tokens-limit",
+		"anthropic-ratelimit-tokens-remaining",
+		"anthropic-ratelimit-tokens-reset",
+	} {
 		if v := resp.Header.Get(h); v != "" {
 			w.Header().Set(h, v)
 		}

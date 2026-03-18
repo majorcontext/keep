@@ -215,6 +215,7 @@ func systemToString(system any) string {
 // Uses a simple heuristic of ~4 characters per token.
 func estimateTokens(req *MessagesRequest) int {
 	total := len(systemToString(req.System))
+	imageTokens := 0
 	for _, msg := range req.Messages {
 		blocks := msg.ContentBlocks()
 		for _, b := range blocks {
@@ -225,10 +226,13 @@ func estimateTokens(req *MessagesRequest) int {
 				total += len(b.ToolResultContent())
 			case "tool_use":
 				total += len(fmt.Sprintf("%v", b.Input))
+			case "image":
+				// Image blocks are roughly 1000 tokens each (Anthropic's documented default for standard images)
+				imageTokens += 1000
 			}
 		}
 	}
-	return total / 4
+	return total/4 + imageTokens
 }
 
 // countToolResults counts tool_result blocks in the request.

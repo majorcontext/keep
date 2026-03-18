@@ -1,6 +1,10 @@
 package anthropic
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"fmt"
+	"log"
+)
 
 // MessagesRequest is the Anthropic /v1/messages request body.
 type MessagesRequest struct {
@@ -90,7 +94,13 @@ func toContentBlocks(v any) []ContentBlock {
 		blocks := make([]ContentBlock, 0, len(val))
 		for _, item := range val {
 			if b, ok := item.(map[string]any); ok {
-				blocks = append(blocks, mapToContentBlock(b))
+				block, err := mapToContentBlock(b)
+				if err != nil {
+					// Log and skip malformed blocks rather than silently including empty ones
+					log.Printf("warning: skipping malformed content block: %v", err)
+					continue
+				}
+				blocks = append(blocks, block)
 			}
 		}
 		return blocks
@@ -109,14 +119,14 @@ func toContentBlocks(v any) []ContentBlock {
 }
 
 // mapToContentBlock converts a map[string]any (from JSON decode into any) to a ContentBlock.
-func mapToContentBlock(m map[string]any) ContentBlock {
+func mapToContentBlock(m map[string]any) (ContentBlock, error) {
 	data, err := json.Marshal(m)
 	if err != nil {
-		return ContentBlock{}
+		return ContentBlock{}, fmt.Errorf("marshal content block: %w", err)
 	}
-	var b ContentBlock
-	if err := json.Unmarshal(data, &b); err != nil {
-		return ContentBlock{}
+	var block ContentBlock
+	if err := json.Unmarshal(data, &block); err != nil {
+		return ContentBlock{}, fmt.Errorf("unmarshal content block: %w", err)
 	}
-	return b
+	return block, nil
 }
