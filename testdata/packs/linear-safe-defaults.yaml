@@ -1,0 +1,8 @@
+name: linear-safe-defaults
+profile: linear
+rules:
+  - name: no-delete
+    match:
+      operation: "delete_issue"
+    action: deny
+    message: "Pack: Issue deletion is not permitted."
