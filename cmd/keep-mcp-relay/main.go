@@ -85,6 +85,20 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 
+	reloadCh := make(chan os.Signal, 1)
+	signal.Notify(reloadCh, syscall.SIGHUP)
+
+	go func() {
+		for range reloadCh {
+			log.Println("received SIGHUP, reloading rules (upstream connections unchanged)...")
+			if err := engine.Reload(); err != nil {
+				log.Printf("reload failed: %v (keeping current rules)", err)
+			} else {
+				log.Println("rules reloaded successfully")
+			}
+		}
+	}()
+
 	go func() {
 		<-sigCh
 		log.Println("shutting down...")
