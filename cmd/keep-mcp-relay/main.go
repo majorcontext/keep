@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/majorcontext/keep"
 	"github.com/majorcontext/keep/internal/audit"
@@ -72,8 +73,12 @@ func main() {
 
 	// 6. Start HTTP server
 	httpServer := &http.Server{
-		Addr:    cfg.Listen,
-		Handler: server,
+		Addr:              cfg.Listen,
+		Handler:           server,
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      60 * time.Second,
+		IdleTimeout:       120 * time.Second,
 	}
 
 	// 7. Handle signals for graceful shutdown
@@ -83,7 +88,9 @@ func main() {
 	go func() {
 		<-sigCh
 		log.Println("shutting down...")
-		httpServer.Shutdown(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		httpServer.Shutdown(ctx)
 	}()
 
 	tools := router.Tools()

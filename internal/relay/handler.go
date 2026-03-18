@@ -35,7 +35,7 @@ func (h *RelayHandler) HandleToolCall(ctx context.Context, name string, args map
 		Operation: name,
 		Params:    args,
 		Context: keep.CallContext{
-			AgentID:   "relay", // TODO: extract from request context
+			AgentID:   "relay", // TODO(m1): extract agent identity from MCP initialize clientInfo or X-Agent-ID header
 			Timestamp: time.Now(),
 			Scope:     route.Scope,
 			Direction: "request",
