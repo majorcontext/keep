@@ -55,9 +55,9 @@ type LogConfig struct {
 }
 
 // validProviders is the set of accepted provider names.
+// Only "anthropic" is implemented. OpenAI support is planned.
 var validProviders = map[string]bool{
 	"anthropic": true,
-	"openai":    true,
 }
 
 // Load reads and validates a gateway config from a YAML file.
@@ -88,7 +88,7 @@ func (c *GatewayConfig) validate() error {
 		return fmt.Errorf("gateway config: provider is required")
 	}
 	if !validProviders[c.Provider] {
-		return fmt.Errorf("gateway config: provider %q is not valid, must be one of: anthropic, openai", c.Provider)
+		return fmt.Errorf("gateway config: provider %q is not valid, must be: anthropic (openai support coming soon)", c.Provider)
 	}
 	if c.Upstream == "" {
 		return fmt.Errorf("gateway config: upstream is required")

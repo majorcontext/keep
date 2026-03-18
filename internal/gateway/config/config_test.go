@@ -139,9 +139,9 @@ func TestLoad_DecomposeDefaults(t *testing.T) {
 	y := `
 listen: ":8080"
 rules_dir: "./rules"
-provider: openai
-upstream: "https://api.openai.com"
-scope: openai-gateway
+provider: anthropic
+upstream: "https://api.anthropic.com"
+scope: anthropic-gateway
 `
 	path := writeTempYAML(t, y)
 	cfg, err := Load(path)
