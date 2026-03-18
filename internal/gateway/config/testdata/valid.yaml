@@ -1,0 +1,8 @@
+listen: ":8080"
+rules_dir: "./rules"
+provider: anthropic
+upstream: "https://api.anthropic.com"
+scope: anthropic-gateway
+log:
+  format: json
+  output: stdout
