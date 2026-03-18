@@ -3,9 +3,11 @@ package cel
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
 )
 
 // Env is Keep's configured CEL environment with custom functions.
@@ -29,6 +31,64 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 		// params and context are dynamic maps: any field access works at runtime.
 		cel.Variable("params", cel.DynType),
 		cel.Variable("context", cel.DynType),
+
+		// _timestamp is injected by Eval from ctx["timestamp"]; used by temporal functions.
+		cel.Variable("_timestamp", cel.TimestampType),
+
+		// inTimeWindow(_timestamp, start, end, tz) bool
+		cel.Function("inTimeWindow",
+			cel.Overload(
+				"inTimeWindow_timestamp_string_string_string",
+				[]*cel.Type{cel.TimestampType, cel.StringType, cel.StringType, cel.StringType},
+				cel.BoolType,
+				cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+					ts, ok := args[0].(types.Timestamp)
+					if !ok {
+						return types.Bool(false)
+					}
+					start, ok2 := args[1].(types.String)
+					end, ok3 := args[2].(types.String)
+					tz, ok4 := args[3].(types.String)
+					if !ok2 || !ok3 || !ok4 {
+						return types.Bool(false)
+					}
+					return types.Bool(InTimeWindow(string(start), string(end), string(tz), ts.Time))
+				}),
+			),
+		),
+
+		// dayOfWeek(_timestamp) string — UTC weekday name
+		cel.Function("dayOfWeek",
+			cel.Overload(
+				"dayOfWeek_timestamp",
+				[]*cel.Type{cel.TimestampType},
+				cel.StringType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					ts, ok := val.(types.Timestamp)
+					if !ok {
+						return types.String("")
+					}
+					return types.String(DayOfWeek(ts.Time))
+				}),
+			),
+			// dayOfWeek(_timestamp, tz) string — timezone-aware weekday name
+			cel.Overload(
+				"dayOfWeek_timestamp_string",
+				[]*cel.Type{cel.TimestampType, cel.StringType},
+				cel.StringType,
+				cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+					ts, ok := args[0].(types.Timestamp)
+					if !ok {
+						return types.String("")
+					}
+					tz, ok2 := args[1].(types.String)
+					if !ok2 {
+						return types.String("")
+					}
+					return types.String(DayOfWeekTZ(string(tz), ts.Time))
+				}),
+			),
+		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("cel: create env: %w", err)
@@ -42,7 +102,11 @@ type Program struct {
 }
 
 // Compile parses and type-checks a CEL expression string.
+// Temporal sugar expressions (inTimeWindow, dayOfWeek) are rewritten to inject
+// _timestamp as their first argument before compilation.
 func (e *Env) Compile(expr string) (*Program, error) {
+	expr = rewriteTemporalCalls(expr)
+
 	ast, iss := e.env.Compile(expr)
 	if iss.Err() != nil {
 		return nil, fmt.Errorf("cel: compile %q: %w", expr, iss.Err())
@@ -66,9 +130,18 @@ func (p *Program) Eval(params map[string]any, ctx map[string]any) (bool, error) 
 		ctx = map[string]any{}
 	}
 
+	// Extract timestamp from context for temporal functions.
+	var ts time.Time
+	if raw, ok := ctx["timestamp"]; ok {
+		if t, ok := raw.(time.Time); ok {
+			ts = t
+		}
+	}
+
 	out, _, err := p.prog.Eval(map[string]any{
-		"params":  params,
-		"context": ctx,
+		"params":     params,
+		"context":    ctx,
+		"_timestamp": ts,
 	})
 	if err != nil {
 		// Treat missing field / no such key errors as false so that expressions
