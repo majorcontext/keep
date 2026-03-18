@@ -1,6 +1,6 @@
 # Keep -- API-Level Policy Engine for AI Agents
 
-**Product Requirements Document -- Draft v0.5**
+**Product Requirements Document -- Draft v0.6**
 **Major Context -- March 2026**
 
 ---
@@ -486,12 +486,10 @@ rules:
         - match: "(?i)(password|secret|api_key|token)\\s*[=:]\\s*\\S+"
           replace: "[REDACTED:SECRET]"
 
-  - name: block-phi
-    match:
-      operation: "llm.tool_result"
-      when: "containsPHI(params.content)"
-    action: deny
-    message: "Tool result contains potential PHI. Sanitize the data source."
+  # PHI detection is not handled by a built-in function. For structured PHI
+  # patterns (MRN, ICD codes, labeled fields), use explicit regex patterns in
+  # redact rules targeting specific fields. Unstructured PHI detection will be
+  # addressed via pluggable predicates (LLM-as-judge) in the future.
 
   - name: context-size-limit
     match:
@@ -532,7 +530,7 @@ rules:
       operation: "send_email"
       when: >
         !params.to.all(addr, addr.endsWith('@ourcompany.com'))
-        && !inTimeWindow('09:00', '18:00', 'America/Los_Angeles')
+        && !inTimeWindow(now, '09:00', '18:00', 'America/Los_Angeles')
     action: deny
     message: "External emails blocked outside 9am-6pm PT."
 
@@ -543,12 +541,9 @@ rules:
     action: deny
     message: "Sending to this domain is not permitted."
 
-  - name: no-pii-in-body
-    match:
-      operation: "send_email"
-      when: "containsPII(params.body)"
-    action: deny
-    message: "Email body contains patterns matching PII."
+  # PII detection (SSN, credit card, etc.) is handled via explicit regex
+  # patterns in redact rules targeting specific fields, not a built-in
+  # containsPII function. See the redact action and redact block syntax.
 
   - name: send-rate
     match:
@@ -699,9 +694,9 @@ Shared across all scopes and integration types:
 
 **String:** `matches(regex)`, `startsWith(prefix)`, `endsWith(suffix)`, `contains(substr)`
 
-**Content patterns:** `containsAny(field, [terms...])`, `containsPII(field)`, `containsPHI(field)`
+**Content patterns:** `containsAny(field, [terms...])` -- keyword search. PII/PHI detection uses explicit regex patterns in redact rules.
 
-**Temporal:** `inTimeWindow(start, end, tz)`, `dayOfWeek()`
+**Temporal:** `inTimeWindow(now, start, end, tz)`, `dayOfWeek(now)`, `dayOfWeek(now, tz)` -- `now` is a top-level CEL variable of type `timestamp`, automatically bound to `context.timestamp` at eval time.
 
 **Rate:** `rateCount(key, window)` -- sliding window counters. Requires a local counter store (in-memory or embedded KV), not a network call. This is the one predicate that is not purely stateless.
 
@@ -864,8 +859,8 @@ The policy engine is the core. It ships as a library. `keep-mcp-relay` and `keep
 
 ### M3: Content inspection + production hardening
 
-- Named PII pattern library (`containsPII`)
-- PHI detection research (regex baseline vs. DLP integration vs. dedicated model)
+- PII/PHI detection via user-supplied regex patterns in redact rules (already supported)
+- Pluggable predicate interface research (LLM-as-judge for unstructured PHI detection)
 - OpenAI-compatible LLM gateway
 - Configuration hot-reload
 - Fail-open/fail-closed modes
@@ -1046,7 +1041,7 @@ Exit code 0 if all tests pass, 1 if any test fails, 2 on load errors (bad fixtur
 
 5. **Multi-agent policy.** When multiple agents share a scope, they share rules. Per-agent behavior is expressed via `context.agent_id` in `when` clauses. **Remaining question:** should there be syntactic sugar for per-agent rule overrides, or is the CEL predicate sufficient? Deferring -- CEL predicates are sufficient for launch.
 
-6. **PHI detection feasibility.** Regex catches obvious patterns but PHI is contextual. **M0 position:** `containsPHI()` ships as a stub that always returns `false` with a log warning. Real implementation is M3. The function signature is stable so rules can be written now. **Future direction:** PHI is the strongest candidate for the LLM-as-judge predicate (see #8). Regex covers structured formats (MRN, ICD codes, labeled fields); an LLM judge could handle unstructured clinical text where pattern matching fails. A DLP service integration (Google DLP, AWS Macie) is the middle ground -- better than regex, cheaper than an LLM call, but adds a network dependency.
+6. **PHI detection feasibility.** Regex catches obvious patterns but PHI is contextual. **Updated position:** `containsPHI()` (and `containsPII()`) have been removed -- they were shallow regex wrappers that gave a false sense of security. Users write explicit regex patterns in redact rules targeting specific fields, which is more transparent and already works. **Future direction:** PHI remains the strongest candidate for the LLM-as-judge predicate (see #8). For structured formats (MRN, ICD codes, labeled fields), explicit regex patterns in redact rules are sufficient. For unstructured clinical text where pattern matching fails, a pluggable predicate interface (`llmJudge`) is the right path. A DLP service integration (Google DLP, AWS Macie) is the middle ground -- better than regex, cheaper than an LLM call, but adds a network dependency.
 
 7. **Defense-in-depth narrative.** Keep (API-level), Moat (network-level), agentsh (syscall-level) form a stack. **M0 position:** document the layering in Keep's docs but don't build cross-product integration until M2 (Moat composition).
 

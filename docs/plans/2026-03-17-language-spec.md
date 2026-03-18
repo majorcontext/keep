@@ -108,7 +108,7 @@ Glob syntax: `*` matches any sequence of characters. `?` matches any single char
 match:
   when: "params.priority == 0"
   when: "params.name == 'bash' && params.input.command.matches('rm -rf')"
-  when: "!inTimeWindow('09:00', '18:00', 'America/Los_Angeles')"
+  when: "!inTimeWindow(now, '09:00', '18:00', 'America/Los_Angeles')"
 ```
 
 If both `operation` and `when` are present, both must match. If neither is present, the rule always matches (useful for blanket logging or redaction).
@@ -306,6 +306,7 @@ Every CEL expression has access to these variables:
 ```
 params      map(string, dyn)     // the call's parameters
 context     Context              // the call's metadata
+now         timestamp            // context.timestamp, for use in temporal functions
 ```
 
 Context fields:
@@ -410,42 +411,44 @@ size(params.to) + size(params.cc) > 10
 
 ### Custom functions: temporal
 
-```
-inTimeWindow(start: string, end: string, tz: string) -> bool
-```
+All temporal functions take an explicit `now` parameter. `now` is a top-level CEL variable of type `timestamp`, automatically bound to `context.timestamp` at eval time.
 
-Returns true if `context.timestamp` falls within the given time window. `start` and `end` are `HH:MM` in 24-hour format. `tz` is an IANA timezone name.
-
-```cel
-inTimeWindow("09:00", "18:00", "America/Los_Angeles")
-inTimeWindow("00:00", "06:00", "UTC")
+```
+inTimeWindow(now: timestamp, start: string, end: string, tz: string) -> bool
 ```
 
-The window does not wrap across midnight. `inTimeWindow("22:00", "06:00", tz)` is always false. To express overnight windows, use `||`:
+Returns true if `now` falls within the given time window. `start` and `end` are `HH:MM` in 24-hour format. `tz` is an IANA timezone name.
 
 ```cel
-inTimeWindow("22:00", "23:59", "US/Eastern") || inTimeWindow("00:00", "06:00", "US/Eastern")
+inTimeWindow(now, "09:00", "18:00", "America/Los_Angeles")
+inTimeWindow(now, "00:00", "06:00", "UTC")
 ```
 
-```
-dayOfWeek() -> string
-```
-
-Returns the lowercase day name from `context.timestamp` in UTC: `"monday"`, `"tuesday"`, etc.
+The window does not wrap across midnight. `inTimeWindow(now, "22:00", "06:00", tz)` is always false. To express overnight windows, use `||`:
 
 ```cel
-dayOfWeek() in ["saturday", "sunday"]
-!(dayOfWeek() in ["saturday", "sunday"])
+inTimeWindow(now, "22:00", "23:59", "US/Eastern") || inTimeWindow(now, "00:00", "06:00", "US/Eastern")
 ```
 
 ```
-dayOfWeek(tz: string) -> string
+dayOfWeek(now: timestamp) -> string
+```
+
+Returns the lowercase day name from `now` in UTC: `"monday"`, `"tuesday"`, etc.
+
+```cel
+dayOfWeek(now) in ["saturday", "sunday"]
+!(dayOfWeek(now) in ["saturday", "sunday"])
+```
+
+```
+dayOfWeek(now: timestamp, tz: string) -> string
 ```
 
 Returns the day name in the specified timezone:
 
 ```cel
-dayOfWeek("America/Los_Angeles") == "friday"
+dayOfWeek(now, "America/Los_Angeles") == "friday"
 ```
 
 ### Custom functions: content patterns
@@ -461,38 +464,7 @@ containsAny(params.title, ["acquisition", "merger", "RIF", "layoff"])
 containsAny(params.text, ["<!here>", "<!channel>"])
 ```
 
-```
-containsPII(field: string) -> bool
-```
-
-Returns true if the string field matches any pattern in the built-in PII pattern library. Patterns include:
-- US Social Security Numbers (`\d{3}-\d{2}-\d{4}`)
-- Credit card numbers (Luhn-validated, major card prefixes)
-- US phone numbers
-- Email addresses (when detection is enabled)
-
-The pattern library is configurable. Specific patterns can be enabled/disabled per scope.
-
-```cel
-containsPII(params.body)
-containsPII(params.content)
-```
-
-```
-containsPHI(field: string) -> bool
-```
-
-Returns true if the string field matches patterns in the PHI pattern library. Initially regex-based; future versions may support pluggable detection backends (DLP services, ML models).
-
-PHI patterns include:
-- Medical Record Numbers (configurable format)
-- Date of birth patterns in clinical context
-- ICD/CPT codes
-- Common PHI field labels ("Patient:", "MRN:", "DOB:")
-
-```cel
-containsPHI(params.content)
-```
+PII and PHI detection is handled via explicit regex patterns in redact rules targeting specific fields, rather than built-in functions. This avoids a false sense of security from shallow regex wrappers and makes the detection logic transparent and auditable. See the redact block syntax in Part 1.
 
 ### Custom functions: rate limiting
 
@@ -746,13 +718,10 @@ rules:
         - match: "-----BEGIN (RSA |EC )?PRIVATE KEY-----[\\s\\S]*?-----END \\1PRIVATE KEY-----"
           replace: "[REDACTED:PRIVATE_KEY]"
 
-  - name: block-phi
-    description: "Block tool results containing PHI"
-    match:
-      operation: "llm.tool_result"
-      when: "containsPHI(params.content)"
-    action: deny
-    message: "Tool result contains potential PHI. Sanitize the data source."
+  # PHI detection is not handled by a built-in function. For structured PHI
+  # patterns (MRN, ICD codes, labeled fields), use explicit regex patterns in
+  # redact rules targeting specific fields. Unstructured PHI detection will be
+  # addressed via pluggable predicates (LLM-as-judge) in the future.
 
   - name: block-db-results
     description: "Don't let the model see raw database query results"

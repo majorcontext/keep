@@ -95,7 +95,8 @@ Phases 1-4 are M0. Phase 5 is M1. Phase 6 runs in parallel throughout.
 
 **CEL environment:**
 - Standard: field access, comparison, logic, collections, string functions
-- Custom: `inTimeWindow()`, `dayOfWeek()`, `containsAny()`, `containsPII()`, `containsPHI()` (stub), `rateCount()`, `estimateTokens()`
+- Custom: `inTimeWindow(now, ...)`, `dayOfWeek(now, ...)`, `containsAny()`, `rateCount()`, `estimateTokens()`
+- Top-level variable: `now` (timestamp, bound to `context.timestamp` at eval time)
 - Profile alias resolution (rewrite identifiers before compilation)
 - Null-safe field access
 

@@ -99,7 +99,7 @@ Create `internal/cel/temporal_test.go`:
 - `TestInTimeWindow_NoWrap` -- 22:00-06:00 returns false (no midnight wrap)
 - `TestDayOfWeek_UTC` -- known timestamp returns correct day
 - `TestDayOfWeek_WithTimezone` -- same timestamp, different timezone, may return different day
-- `TestInTimeWindow_CEL` -- full CEL expression `"inTimeWindow('09:00', '18:00', 'America/Los_Angeles')"` evaluated with context.timestamp inside window
+- `TestInTimeWindow_CEL` -- full CEL expression `"inTimeWindow(now, '09:00', '18:00', 'America/Los_Angeles')"` evaluated with `now` bound to a timestamp inside window
 
 - [ ] **Step 2: Run tests to verify they fail**
 
@@ -109,9 +109,11 @@ Expected: FAIL
 - [ ] **Step 3: Implement temporal functions**
 
 Create `internal/cel/temporal.go`:
-- `inTimeWindow(start, end, tz string) bool` -- uses `context.timestamp`
-- `dayOfWeek() string` -- UTC, returns lowercase day name
-- `dayOfWeek(tz string) string` -- in specified timezone
+- `inTimeWindow(now timestamp, start, end, tz string) bool` -- `now` is a top-level CEL variable bound to `context.timestamp` at eval time
+- `dayOfWeek(now timestamp) string` -- UTC, returns lowercase day name
+- `dayOfWeek(now timestamp, tz string) string` -- in specified timezone
+
+The `now` variable is declared as a top-level CEL variable of type `timestamp` in the environment. No rewriting sugar -- callers pass `now` explicitly.
 
 Register both as CEL custom functions in the environment.
 
@@ -141,10 +143,6 @@ Create `internal/cel/content_test.go`:
 - `TestContainsAny_Match` -- `containsAny("hello world", ["hello", "test"])` returns true
 - `TestContainsAny_NoMatch` -- `containsAny("hello world", ["foo", "bar"])` returns false
 - `TestContainsAny_CaseInsensitive` -- `containsAny("HELLO", ["hello"])` returns true
-- `TestContainsPII_SSN` -- `containsPII("my ssn is 123-45-6789")` returns true
-- `TestContainsPII_CreditCard` -- `containsPII("card 4111111111111111")` returns true
-- `TestContainsPII_Clean` -- `containsPII("nothing sensitive here")` returns false
-- `TestContainsPHI_Stub` -- `containsPHI("anything")` returns false (stub for M0)
 - `TestEstimateTokens` -- `estimateTokens("hello world")` returns ~3 (11/4)
 
 - [ ] **Step 2: Run tests to verify they fail**
@@ -156,9 +154,9 @@ Expected: FAIL
 
 Create `internal/cel/content.go`:
 - `containsAny(field string, terms []string) bool` -- case-insensitive substring match
-- `containsPII(field string) bool` -- regex library: SSN (`\d{3}-\d{2}-\d{4}`), credit card (major prefixes + Luhn), US phone
-- `containsPHI(field string) bool` -- stub, always returns false, logs warning once
 - `estimateTokens(field string) int` -- `len(field) / 4`
+
+`containsPII` and `containsPHI` are not implemented -- they were shallow regex wrappers that gave a false sense of security. PII/PHI detection is handled via explicit regex patterns in redact rules, which is more transparent and auditable.
 
 Register all as CEL custom functions.
 
@@ -171,7 +169,7 @@ Expected: PASS
 
 ```bash
 git add internal/cel/
-git commit -m "feat(cel): add containsAny, containsPII, containsPHI, estimateTokens"
+git commit -m "feat(cel): add containsAny and estimateTokens"
 ```
 
 ---

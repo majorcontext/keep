@@ -373,7 +373,7 @@ rules:
       operation: "send_email"
       when: >
         !params.to.all(addr, addr.endsWith('@ourcompany.com'))
-        && !inTimeWindow('09:00', '18:00', 'America/Los_Angeles')
+        && !inTimeWindow(now, '09:00', '18:00', 'America/Los_Angeles')
     action: deny
     message: "External emails blocked outside 9am-6pm PT. Internal addresses are always allowed."
 
@@ -393,13 +393,9 @@ rules:
     action: deny
     message: "Maximum 10 recipients per message."
 
-  # Block PII in email body
-  - name: no-pii-in-body
-    match:
-      operation: "send_email"
-      when: "containsPII(params.body)"
-    action: deny
-    message: "Email body contains patterns matching PII (SSN, credit card). Review and redact."
+  # PII detection (SSN, credit card, etc.) is handled via explicit regex
+  # patterns in redact rules targeting specific fields, not a built-in
+  # containsPII function. See the redact action and redact block syntax.
 
   # Rate limit outbound email
   - name: send-rate
@@ -476,13 +472,10 @@ rules:
         - match: "-----BEGIN (RSA |EC )?PRIVATE KEY-----[\\s\\S]*?-----END \\1PRIVATE KEY-----"
           replace: "[REDACTED:PRIVATE_KEY]"
 
-  # Block if a tool result contains PHI
-  - name: block-phi
-    match:
-      operation: "llm.tool_result"
-      when: "containsPHI(params.content)"
-    action: deny
-    message: "Tool result contains potential PHI. Sanitize the data source."
+  # PHI detection is not handled by a built-in function. For structured PHI
+  # patterns (MRN, ICD codes, labeled fields), use explicit regex patterns in
+  # redact rules targeting specific fields. Unstructured PHI detection will be
+  # addressed via pluggable predicates (LLM-as-judge) in the future.
 
   # Block tool results from specific tools entirely (e.g., don't let
   # the model see output from a database query tool)
@@ -564,7 +557,6 @@ Call 2:
 
 Rule evaluations:
   redact-secrets:  REDACT  (AWS key matched, password matched)
-  block-phi:       SKIP    (no PHI detected)
   block-db-results: SKIP   (tool_name is "bash", not "sql_query")
   audit-all:       LOG
 
@@ -756,13 +748,13 @@ Available in all `when` clauses across all scopes.
 `matches(regex)`, `startsWith(prefix)`, `endsWith(suffix)`, `contains(substr)`
 
 **Content patterns:**
-`containsAny(field, [terms...])` -- keyword search
-`containsPII(field)` -- named regex library (SSN, CC, etc.)
-`containsPHI(field)` -- named regex library (MRN, DOB patterns, etc.) + future DLP hook
+`containsAny(field, [terms...])` -- keyword search. PII/PHI detection uses explicit regex patterns in redact rules.
 
 **Temporal:**
-`inTimeWindow(start, end, timezone)` -- is `context.timestamp` within window?
-`dayOfWeek()` -- day name from `context.timestamp`
+`inTimeWindow(now, start, end, timezone)` -- is `now` within window?
+`dayOfWeek(now)` -- day name from `now` in UTC
+`dayOfWeek(now, tz)` -- day name from `now` in specified timezone
+`now` is a top-level CEL variable of type `timestamp`, automatically bound to `context.timestamp` at eval time.
 
 **Rate:**
 `rateCount(key, window)` -- call count matching key in sliding window ("1h", "24h"). Requires a local counter store (in-memory or embedded KV). Not a network call.
