@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"time"
 
 	"github.com/majorcontext/keep"
@@ -18,6 +19,9 @@ import (
 
 // maxRequestBodySize is the maximum size of a request body we will read (4 MB).
 const maxRequestBodySize = 4 * 1024 * 1024
+
+// maxResponseBodySize is the maximum size of an upstream response body we will read (16 MB).
+const maxResponseBodySize = 16 << 20 // 16 MB
 
 // Proxy is the LLM gateway HTTP handler.
 type Proxy struct {
@@ -46,7 +50,10 @@ func NewProxy(engine *keep.Engine, cfg *gwconfig.GatewayConfig, logger *audit.Lo
 		decompose: cfg.Decompose,
 		logger:    logger,
 		passthru:  rp,
-		client:    &http.Client{Timeout: 120 * time.Second},
+		// 110s client timeout is less than the server's 120s WriteTimeout,
+		// ensuring the upstream error response has time to be written back
+		// before the server closes the connection.
+		client: &http.Client{Timeout: 110 * time.Second},
 	}, nil
 }
 
@@ -111,6 +118,20 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 2b. Reject streaming requests — the policy gateway cannot evaluate streamed responses.
+	if req.Stream {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]any{
+			"type": "error",
+			"error": map[string]any{
+				"type":    "unsupported",
+				"message": "Streaming is not supported by the policy gateway. Set stream: false.",
+			},
+		})
+		return
+	}
+
 	// 3. Decompose request into calls.
 	calls := anthropic.DecomposeRequest(&req, p.scope, p.decompose)
 
@@ -172,7 +193,8 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 7. Forward to upstream.
-	upstreamURL := p.upstream.String() + "/v1/messages"
+	upstreamBase := strings.TrimRight(p.upstream.String(), "/")
+	upstreamURL := upstreamBase + "/v1/messages"
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", upstreamURL, bytes.NewReader(forwardBody))
 	if err != nil {
 		writeInternalError(w, "failed to create upstream request")
@@ -194,7 +216,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 	defer upstreamResp.Body.Close()
 
 	// 8. Read response body.
-	respBody, err := io.ReadAll(upstreamResp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(upstreamResp.Body, maxResponseBodySize))
 	if err != nil {
 		writeInternalError(w, "failed to read upstream response")
 		return
@@ -283,31 +305,16 @@ type blockPosition struct {
 
 // buildRequestBlockMap walks the request messages in the same order as DecomposeRequest
 // and returns the (MessageIndex, BlockIndex) for each content-block call.
+// Uses the shared WalkRequestBlocks iterator to ensure consistent traversal.
 func buildRequestBlockMap(req *anthropic.MessagesRequest, cfg gwconfig.DecomposeConfig) []blockPosition {
-	var positions []blockPosition
-
-	for msgIdx, msg := range req.Messages {
-		blocks := msg.ContentBlocks()
-		for blockIdx, block := range blocks {
-			switch block.Type {
-			case "tool_result":
-				if cfg.ToolResultEnabled() {
-					positions = append(positions, blockPosition{
-						MessageIndex: msgIdx,
-						BlockIndex:   blockIdx,
-					})
-				}
-			case "text":
-				if cfg.TextEnabled() {
-					positions = append(positions, blockPosition{
-						MessageIndex: msgIdx,
-						BlockIndex:   blockIdx,
-					})
-				}
-			}
+	walked := anthropic.WalkRequestBlocks(req, cfg)
+	positions := make([]blockPosition, len(walked))
+	for i, pos := range walked {
+		positions[i] = blockPosition{
+			MessageIndex: pos.MessageIndex,
+			BlockIndex:   pos.BlockIndex,
 		}
 	}
-
 	return positions
 }
 

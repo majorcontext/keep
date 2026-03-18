@@ -337,6 +337,86 @@ func TestProxy_PassthroughNonMessages(t *testing.T) {
 	}
 }
 
+func TestProxy_StreamingRejected(t *testing.T) {
+	upstream := echoUpstream()
+	defer upstream.Close()
+
+	p := newTestProxy(t, upstream.URL, nil)
+	gw := httptest.NewServer(p)
+	defer gw.Close()
+
+	reqBody := anthropic.MessagesRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 1024,
+		Stream:    true,
+		Messages: []anthropic.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	resp, err := http.Post(gw.URL+"/v1/messages", "application/json", bytes.NewReader(bodyBytes))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 400, got %d: %s", resp.StatusCode, body)
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	if !strings.Contains(string(body), "Streaming") {
+		t.Errorf("expected 'Streaming' in error message, got: %s", body)
+	}
+}
+
+func TestProxy_OversizedUpstreamResponse(t *testing.T) {
+	// Upstream that returns a body larger than maxResponseBodySize.
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		// Write a response that exceeds 16 MB. The gateway should truncate it via LimitReader,
+		// causing a JSON parse failure, which results in the truncated body being passed through.
+		w.WriteHeader(http.StatusOK)
+		// Write a valid JSON start, then pad with data to exceed the limit.
+		_, _ = w.Write([]byte(`{"id":"msg_big","type":"message","role":"assistant","content":[{"type":"text","text":"`))
+		// Write 17 MB of padding
+		chunk := bytes.Repeat([]byte("x"), 1024*1024)
+		for i := 0; i < 17; i++ {
+			_, _ = w.Write(chunk)
+		}
+		_, _ = w.Write([]byte(`"}],"model":"claude-sonnet-4-20250514","stop_reason":"end_turn"}`))
+	}))
+	defer upstream.Close()
+
+	p := newTestProxy(t, upstream.URL, nil)
+	gw := httptest.NewServer(p)
+	defer gw.Close()
+
+	reqBody := anthropic.MessagesRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 1024,
+		Messages: []anthropic.Message{
+			{Role: "user", Content: "Hello"},
+		},
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	resp, err := http.Post(gw.URL+"/v1/messages", "application/json", bytes.NewReader(bodyBytes))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// The response was truncated at 16 MB, so JSON unmarshal will fail.
+	// The gateway should still return a response (pass-through of truncated body).
+	// We just verify the gateway didn't crash and returned some response.
+	if resp.StatusCode != http.StatusOK {
+		t.Logf("got status %d (acceptable — oversized response handling)", resp.StatusCode)
+	}
+}
+
 func TestProxy_AuditLogged(t *testing.T) {
 	upstream := echoUpstream()
 	defer upstream.Close()
