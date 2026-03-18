@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"sync"
+	"time"
 
 	keepcel "github.com/majorcontext/keep/internal/cel"
 	"github.com/majorcontext/keep/internal/config"
@@ -85,11 +86,21 @@ func Load(rulesDir string, opts ...Option) (*Engine, error) {
 		return nil, err
 	}
 
+	store.StartGC(60*time.Second, 24*time.Hour)
+
 	return &Engine{
 		evaluators: evaluators,
 		rateStore:  store,
 		cfg:        cfg,
 	}, nil
+}
+
+// Close stops the rate counter GC goroutine. Call this when the engine
+// is no longer needed to prevent goroutine leaks.
+func (e *Engine) Close() {
+	if e.rateStore != nil {
+		e.rateStore.StopGC()
+	}
 }
 
 // Evaluate runs all rules in the given scope against the call and returns

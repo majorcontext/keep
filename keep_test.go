@@ -13,6 +13,7 @@ func TestLoad_ValidRules(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
+	defer eng.Close()
 
 	scopes := eng.Scopes()
 	want := []string{"anthropic-gateway", "linear-tools"}
@@ -57,6 +58,7 @@ func TestLoad_WithOptions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
+	defer eng.Close()
 	if len(eng.Scopes()) == 0 {
 		t.Error("expected at least one scope")
 	}
@@ -67,6 +69,7 @@ func TestEngine_Scopes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
+	defer eng.Close()
 
 	scopes := eng.Scopes()
 	// Must be sorted.
@@ -83,6 +86,7 @@ func TestEvaluate_Allow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
+	defer eng.Close()
 
 	result, err := eng.Evaluate(keep.Call{
 		Operation: "create_issue",
@@ -101,6 +105,7 @@ func TestEvaluate_Deny(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
+	defer eng.Close()
 
 	result, err := eng.Evaluate(keep.Call{
 		Operation: "delete_issue",
@@ -122,6 +127,7 @@ func TestEvaluate_DenyWhen(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
+	defer eng.Close()
 
 	result, err := eng.Evaluate(keep.Call{
 		Operation: "create_issue",
@@ -143,6 +149,7 @@ func TestEvaluate_Redact(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
+	defer eng.Close()
 
 	result, err := eng.Evaluate(keep.Call{
 		Operation: "llm.tool_result",
@@ -171,6 +178,7 @@ func TestEvaluate_UnknownScope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
+	defer eng.Close()
 
 	_, err = eng.Evaluate(keep.Call{
 		Operation: "anything",
@@ -217,6 +225,7 @@ func TestReload(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load() error: %v", err)
 	}
+	defer eng.Close()
 
 	if len(eng.Scopes()) != 1 {
 		t.Fatalf("Scopes() = %v, want 1 scope", eng.Scopes())

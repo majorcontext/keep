@@ -19,9 +19,10 @@ func (realClock) Now() time.Time { return time.Now() }
 
 // Store is a thread-safe sliding window counter store.
 type Store struct {
-	mu    sync.Mutex
-	data  map[string][]time.Time
-	clock Clock
+	mu     sync.Mutex
+	data   map[string][]time.Time
+	clock  Clock
+	stopCh chan struct{}
 }
 
 // NewStore creates a new counter store using real time.
@@ -62,6 +63,32 @@ func (s *Store) Count(key string, window time.Duration) int {
 		}
 	}
 	return count
+}
+
+// StartGC begins periodic garbage collection in a background goroutine.
+// Runs every interval, removing entries older than maxAge.
+// Call StopGC to stop the goroutine.
+func (s *Store) StartGC(interval, maxAge time.Duration) {
+	s.stopCh = make(chan struct{})
+	go func() {
+		ticker := time.NewTicker(interval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				s.GC(maxAge)
+			case <-s.stopCh:
+				return
+			}
+		}
+	}()
+}
+
+// StopGC stops the periodic garbage collection goroutine.
+func (s *Store) StopGC() {
+	if s.stopCh != nil {
+		close(s.stopCh)
+	}
 }
 
 // GC removes entries older than maxAge from all keys.
