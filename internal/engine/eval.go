@@ -146,10 +146,19 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 		"labels":    call.Context.Labels,
 	}
 
+	// NOTE: audit_only mode prevents enforcement of deny/redact decisions but
+	// does NOT suppress side effects in CEL functions (e.g., rateCount still
+	// increments counters). This is a known limitation.
 	auditOnly := ev.mode == config.ModeAuditOnly
 
 	var rulesEvaluated []RuleResult
 	var mutations []redact.Mutation
+
+	// In audit_only mode, track the first deny match so we can report it
+	// at the end without short-circuiting rule evaluation.
+	var auditDenyRule string
+	var auditDenyMessage string
+	auditDenied := false
 
 	for _, cr := range ev.rules {
 		// Check operation glob.
@@ -223,43 +232,35 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 
 		switch cr.rule.Action {
 		case config.ActionDeny:
-			decision := Deny
-			auditDecision := decision
-			enforced := true
-			returnDecision := decision
-			returnMessage := cr.rule.Message
-
-			if auditOnly {
-				// Record what would have happened but don't enforce.
-				enforced = false
-				returnDecision = Allow
-			}
-
-			result := EvalResult{
-				Decision: returnDecision,
-				Audit: AuditEntry{
-					Timestamp:      call.Context.Timestamp,
-					Scope:          ev.scope,
-					Operation:      call.Operation,
-					AgentID:        call.Context.AgentID,
-					UserID:         call.Context.UserID,
-					Direction:      call.Context.Direction,
-					Decision:       auditDecision,
-					Rule:           cr.rule.Name,
-					Message:        returnMessage,
-					RulesEvaluated: rulesEvaluated,
-					ParamsSummary:  paramsSummary(celParams),
-					Enforced:       enforced,
-				},
-			}
 			if !auditOnly {
-				result.Rule = cr.rule.Name
-				result.Message = cr.rule.Message
-				return result
+				// Enforce mode: short-circuit and return deny immediately.
+				return EvalResult{
+					Decision: Deny,
+					Rule:     cr.rule.Name,
+					Message:  cr.rule.Message,
+					Audit: AuditEntry{
+						Timestamp:      call.Context.Timestamp,
+						Scope:          ev.scope,
+						Operation:      call.Operation,
+						AgentID:        call.Context.AgentID,
+						UserID:         call.Context.UserID,
+						Direction:      call.Context.Direction,
+						Decision:       Deny,
+						Rule:           cr.rule.Name,
+						Message:        cr.rule.Message,
+						RulesEvaluated: rulesEvaluated,
+						ParamsSummary:  paramsSummary(celParams),
+						Enforced:       true,
+					},
+				}
 			}
-			// In audit_only mode: continue accumulating rules but track deny match.
-			// We return the first deny match's audit info at the end.
-			return result
+			// audit_only mode: record the first deny match, then continue
+			// evaluating remaining rules so audit is complete.
+			if !auditDenied {
+				auditDenied = true
+				auditDenyRule = cr.rule.Name
+				auditDenyMessage = cr.rule.Message
+			}
 
 		case config.ActionLog:
 			// Already recorded in rulesEvaluated; continue.
@@ -274,6 +275,29 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 	}
 
 	// After all rules.
+
+	// In audit_only mode with a deny match, the audit decision is Deny
+	// but the actual decision is Allow (not enforced).
+	if auditOnly && auditDenied {
+		return EvalResult{
+			Decision: Allow,
+			Audit: AuditEntry{
+				Timestamp:      call.Context.Timestamp,
+				Scope:          ev.scope,
+				Operation:      call.Operation,
+				AgentID:        call.Context.AgentID,
+				UserID:         call.Context.UserID,
+				Direction:      call.Context.Direction,
+				Decision:       Deny,
+				Rule:           auditDenyRule,
+				Message:        auditDenyMessage,
+				RulesEvaluated: rulesEvaluated,
+				ParamsSummary:  paramsSummary(celParams),
+				Enforced:       false,
+			},
+		}
+	}
+
 	// In audit_only mode, mutations are never applied and the decision is always Allow.
 	auditDecision := Allow
 	returnDecision := Allow
@@ -290,6 +314,13 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 		returnMutations = nil
 	}
 
+	// Compute paramsSummary after mutations so redacted values are reflected.
+	summary := paramsSummary(celParams)
+	if len(mutations) > 0 {
+		mutatedParams := redact.ApplyMutations(celParams, mutations)
+		summary = paramsSummary(mutatedParams)
+	}
+
 	return EvalResult{
 		Decision:  returnDecision,
 		Mutations: returnMutations,
@@ -302,7 +333,7 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 			Direction:      call.Context.Direction,
 			Decision:       auditDecision,
 			RulesEvaluated: rulesEvaluated,
-			ParamsSummary:  paramsSummary(celParams),
+			ParamsSummary:  summary,
 			Enforced:       enforced,
 		},
 	}

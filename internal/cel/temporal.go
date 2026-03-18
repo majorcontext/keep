@@ -68,9 +68,20 @@ func parseHHMM(s string) (int, error) {
 //
 //	inTimeWindow('HH:MM', 'HH:MM', 'tz')   →  inTimeWindow(_timestamp, 'HH:MM', 'HH:MM', 'tz')
 //	dayOfWeek()                              →  dayOfWeek(_timestamp)
-//	dayOfWeek('tz')                          →  dayOfWeekTZ(_timestamp, 'tz')
+//	dayOfWeek('tz')                          →  dayOfWeek(_timestamp, 'tz')
+//
+// LIMITATION: This uses simple string substitution and is NOT string-literal-aware.
+// Function names appearing inside quoted strings (e.g. 'call inTimeWindow(a,b,c)')
+// will be incorrectly rewritten. A full fix requires AST-level macro rewriting,
+// which is deferred to a future refactor.
 func rewriteTemporalCalls(expr string) string {
 	expr = strings.ReplaceAll(expr, "inTimeWindow(", "inTimeWindow(_timestamp, ")
+	// Handle zero-arg dayOfWeek() BEFORE the generic dayOfWeek( replacement.
+	// Use a two-pass approach: first replace the zero-arg form with a sentinel,
+	// then do the generic replacement, then restore the sentinel.
+	const sentinel = "\x00DOW_NOARG\x00"
+	expr = strings.ReplaceAll(expr, "dayOfWeek()", sentinel)
 	expr = strings.ReplaceAll(expr, "dayOfWeek(", "dayOfWeek(_timestamp, ")
+	expr = strings.ReplaceAll(expr, sentinel, "dayOfWeek(_timestamp)")
 	return expr
 }

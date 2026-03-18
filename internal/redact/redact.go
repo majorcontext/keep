@@ -10,7 +10,11 @@ import (
 
 // Mutation describes a single field change.
 type Mutation struct {
-	Path     string
+	Path string
+	// Original holds the pre-redaction value. It is populated for audit
+	// purposes but MUST NOT be returned to the calling agent or exposed
+	// externally. Callers should strip this field before serializing
+	// the result outside the engine.
 	Original string
 	Replaced string
 }

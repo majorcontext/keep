@@ -149,6 +149,53 @@ func TestEval_AuditOnly_DenyNotEnforced(t *testing.T) {
 	}
 }
 
+// TestEval_AuditOnly_DenyContinuesEvaluation verifies that in audit_only mode, a deny rule
+// does NOT short-circuit — all remaining rules are still evaluated and recorded in the audit.
+func TestEval_AuditOnly_DenyContinuesEvaluation(t *testing.T) {
+	rules := []config.Rule{
+		{
+			Name:    "first-deny",
+			Action:  config.ActionDeny,
+			Match:   config.Match{Operation: "*"},
+			Message: "first deny",
+		},
+		{
+			Name:   "log-after-deny",
+			Action: config.ActionLog,
+			Match:  config.Match{Operation: "*"},
+		},
+		{
+			Name:    "second-deny",
+			Action:  config.ActionDeny,
+			Match:   config.Match{Operation: "*"},
+			Message: "second deny",
+		},
+	}
+	ev := makeEvaluatorWithMode(t, config.ModeAuditOnly, config.ErrorModeClosed, rules)
+	result := ev.Evaluate(makeCall("test_op", nil))
+
+	if result.Decision != Allow {
+		t.Errorf("expected Allow in audit_only mode, got %s", result.Decision)
+	}
+	if result.Audit.Decision != Deny {
+		t.Errorf("expected audit Decision Deny, got %s", result.Audit.Decision)
+	}
+	// Should record the first deny match.
+	if result.Audit.Rule != "first-deny" {
+		t.Errorf("expected audit Rule 'first-deny', got %q", result.Audit.Rule)
+	}
+	// All three rules should be evaluated.
+	if len(result.Audit.RulesEvaluated) != 3 {
+		t.Fatalf("expected 3 rules evaluated, got %d", len(result.Audit.RulesEvaluated))
+	}
+	// Verify all three rules were matched.
+	for i, rr := range result.Audit.RulesEvaluated {
+		if !rr.Matched {
+			t.Errorf("rule %d (%s): expected Matched=true", i, rr.Name)
+		}
+	}
+}
+
 // TestEval_AuditOnly_RedactNotEnforced verifies that in audit_only mode, a redact rule that
 // matches results in Allow with no mutations, but audit records the match.
 func TestEval_AuditOnly_RedactNotEnforced(t *testing.T) {

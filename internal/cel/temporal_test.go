@@ -85,7 +85,27 @@ func TestDayOfWeek_WithTimezone(t *testing.T) {
 	}
 }
 
-// --- CEL integration test ---
+// --- CEL integration tests ---
+
+func TestDayOfWeek_CEL(t *testing.T) {
+	env := mustNewEnv(t)
+
+	// Expression uses the zero-arg sugar form — rewriting injects _timestamp automatically.
+	prog := mustCompile(t, env, "dayOfWeek() == 'monday'")
+
+	// 2026-03-16 is a Monday in UTC.
+	ctx := map[string]any{
+		"timestamp": time.Date(2026, 3, 16, 12, 0, 0, 0, time.UTC),
+	}
+
+	got, err := prog.Eval(nil, ctx)
+	if err != nil {
+		t.Fatalf("Eval() error: %v", err)
+	}
+	if !got {
+		t.Error("expected true: 2026-03-16 is a Monday")
+	}
+}
 
 func TestInTimeWindow_CEL(t *testing.T) {
 	env := mustNewEnv(t)

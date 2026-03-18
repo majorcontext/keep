@@ -1,6 +1,7 @@
 package rate
 
 import (
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -124,6 +125,64 @@ func TestCounter_Concurrent(t *testing.T) {
 
 	if got := s.Count("shared-key", time.Minute); got != goroutines {
 		t.Errorf("Count() = %d, want %d after concurrent increments", got, goroutines)
+	}
+}
+
+func TestStore_StopGC_Idempotent(t *testing.T) {
+	s := NewStore()
+	s.StartGC(time.Minute, 5*time.Minute)
+
+	// Calling StopGC twice should not panic.
+	s.StopGC()
+	s.StopGC()
+}
+
+func TestStore_MaxKeys(t *testing.T) {
+	clk := newMockClock()
+	s := NewStoreWithClock(clk)
+
+	// Fill to capacity.
+	for i := 0; i < maxKeys; i++ {
+		s.Increment(fmt.Sprintf("key-%d", i))
+	}
+
+	// New key beyond limit should be skipped.
+	s.Increment("overflow-key")
+
+	s.mu.Lock()
+	_, exists := s.data["overflow-key"]
+	total := len(s.data)
+	s.mu.Unlock()
+
+	if exists {
+		t.Error("expected overflow-key to be skipped when at maxKeys")
+	}
+	if total != maxKeys {
+		t.Errorf("expected %d keys, got %d", maxKeys, total)
+	}
+
+	// Existing key should still work.
+	s.Increment("key-0")
+	if got := s.Count("key-0", time.Minute); got != 2 {
+		t.Errorf("expected 2 for existing key, got %d", got)
+	}
+}
+
+func TestStore_MaxTimestampsPerKey(t *testing.T) {
+	clk := newMockClock()
+	s := NewStoreWithClock(clk)
+
+	// Fill a single key past the limit.
+	for i := 0; i < maxTimestampsPerKey+100; i++ {
+		s.Increment("flood")
+	}
+
+	s.mu.Lock()
+	got := len(s.data["flood"])
+	s.mu.Unlock()
+
+	if got != maxTimestampsPerKey {
+		t.Errorf("expected timestamps capped at %d, got %d", maxTimestampsPerKey, got)
 	}
 }
 

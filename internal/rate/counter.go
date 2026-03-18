@@ -7,6 +7,13 @@ import (
 	"time"
 )
 
+const (
+	// maxKeys is the maximum number of distinct keys in the store.
+	maxKeys = 100_000
+	// maxTimestampsPerKey is the maximum timestamps stored per key.
+	maxTimestampsPerKey = 100_000
+)
+
 // Clock abstracts time for testing.
 type Clock interface {
 	Now() time.Time
@@ -19,10 +26,11 @@ func (realClock) Now() time.Time { return time.Now() }
 
 // Store is a thread-safe sliding window counter store.
 type Store struct {
-	mu     sync.Mutex
-	data   map[string][]time.Time
-	clock  Clock
-	stopCh chan struct{}
+	mu       sync.Mutex
+	data     map[string][]time.Time
+	clock    Clock
+	stopCh   chan struct{}
+	stopOnce sync.Once
 }
 
 // NewStore creates a new counter store using real time.
@@ -42,10 +50,26 @@ func NewStoreWithClock(clock Clock) *Store {
 }
 
 // Increment records a hit for the given key at the current time.
+// If the store has reached maxKeys and the key is new, the increment is skipped.
+// If a key has reached maxTimestampsPerKey, the oldest entries are trimmed.
 func (s *Store) Increment(key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	// Enforce key limit: skip new keys when at capacity.
+	if _, exists := s.data[key]; !exists {
+		if len(s.data) >= maxKeys {
+			return
+		}
+	}
+
 	s.data[key] = append(s.data[key], s.clock.Now())
+
+	// Enforce per-key timestamp limit: trim oldest entries.
+	if len(s.data[key]) > maxTimestampsPerKey {
+		excess := len(s.data[key]) - maxTimestampsPerKey
+		s.data[key] = s.data[key][excess:]
+	}
 }
 
 // Count returns the number of hits for key within the given window duration.
@@ -85,9 +109,10 @@ func (s *Store) StartGC(interval, maxAge time.Duration) {
 }
 
 // StopGC stops the periodic garbage collection goroutine.
+// It is safe to call multiple times.
 func (s *Store) StopGC() {
 	if s.stopCh != nil {
-		close(s.stopCh)
+		s.stopOnce.Do(func() { close(s.stopCh) })
 	}
 }
 

@@ -50,6 +50,11 @@ func parseWindow(window string) (time.Duration, error) {
 }
 
 // rateCountFunc increments the counter and returns the count within the window.
+//
+// NOTE: rateCount always increments the counter, even in audit_only mode.
+// This means audit_only evaluation has a side effect on rate counters.
+// This is a known limitation — suppressing increment in audit_only would
+// require threading mode information into the CEL function binding.
 func rateCountFunc(store *rate.Store, key string, window string) (int, error) {
 	if store == nil {
 		return 0, fmt.Errorf("rate: no rate store configured")
