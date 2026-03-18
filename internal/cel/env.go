@@ -46,10 +46,10 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 		cel.Variable("params", cel.DynType),
 		cel.Variable("context", cel.DynType),
 
-		// _timestamp is injected by Eval from ctx["timestamp"]; used by temporal functions.
-		cel.Variable("_timestamp", cel.TimestampType),
+		// now is injected by Eval from ctx["timestamp"]; used by temporal functions.
+		cel.Variable("now", cel.TimestampType),
 
-		// inTimeWindow(_timestamp, start, end, tz) bool
+		// inTimeWindow(now, start, end, tz) bool
 		cel.Function("inTimeWindow",
 			cel.Overload(
 				"inTimeWindow_timestamp_string_string_string",
@@ -133,7 +133,7 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 			),
 		),
 
-		// dayOfWeek(_timestamp) string — UTC weekday name
+		// dayOfWeek(now) string — UTC weekday name
 		cel.Function("dayOfWeek",
 			cel.Overload(
 				"dayOfWeek_timestamp",
@@ -147,7 +147,7 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 					return types.String(DayOfWeek(ts.Time))
 				}),
 			),
-			// dayOfWeek(_timestamp, tz) string — timezone-aware weekday name
+			// dayOfWeek(now, tz) string — timezone-aware weekday name
 			cel.Overload(
 				"dayOfWeek_timestamp_string",
 				[]*cel.Type{cel.TimestampType, cel.StringType},
@@ -178,10 +178,7 @@ type Program struct {
 }
 
 // Compile parses and type-checks a CEL expression string.
-// Temporal sugar expressions (inTimeWindow, dayOfWeek) are rewritten to inject
-// _timestamp as their first argument before compilation.
 func (e *Env) Compile(expr string) (*Program, error) {
-	expr = rewriteTemporalCalls(expr)
 
 	ast, iss := e.env.Compile(expr)
 	if iss.Err() != nil {
@@ -217,7 +214,7 @@ func (p *Program) Eval(params map[string]any, ctx map[string]any) (bool, error) 
 	out, _, err := p.prog.Eval(map[string]any{
 		"params":     params,
 		"context":    ctx,
-		"_timestamp": ts,
+		"now": ts,
 	})
 	if err != nil {
 		// Treat missing field / no such key errors as false so that expressions

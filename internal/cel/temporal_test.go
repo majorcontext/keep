@@ -87,11 +87,29 @@ func TestDayOfWeek_WithTimezone(t *testing.T) {
 
 // --- CEL integration tests ---
 
+func TestInTimeWindow_CEL(t *testing.T) {
+	env := mustNewEnv(t)
+
+	prog := mustCompile(t, env, "inTimeWindow(now, '09:00', '18:00', 'America/Los_Angeles')")
+
+	// 2026-03-16 17:00 UTC = 10:00 AM PDT (UTC-7) — inside the window
+	ctx := map[string]any{
+		"timestamp": time.Date(2026, 3, 16, 17, 0, 0, 0, time.UTC),
+	}
+
+	got, err := prog.Eval(nil, ctx)
+	if err != nil {
+		t.Fatalf("Eval() error: %v", err)
+	}
+	if !got {
+		t.Error("expected true: 10:00 AM PDT is inside 09:00-18:00 America/Los_Angeles")
+	}
+}
+
 func TestDayOfWeek_CEL(t *testing.T) {
 	env := mustNewEnv(t)
 
-	// Expression uses the zero-arg sugar form — rewriting injects _timestamp automatically.
-	prog := mustCompile(t, env, "dayOfWeek() == 'monday'")
+	prog := mustCompile(t, env, "dayOfWeek(now) == 'monday'")
 
 	// 2026-03-16 is a Monday in UTC.
 	ctx := map[string]any{
@@ -107,15 +125,14 @@ func TestDayOfWeek_CEL(t *testing.T) {
 	}
 }
 
-func TestInTimeWindow_CEL(t *testing.T) {
+func TestDayOfWeek_CEL_WithTZ(t *testing.T) {
 	env := mustNewEnv(t)
 
-	// Expression uses the sugar form — rewriting injects _timestamp automatically.
-	prog := mustCompile(t, env, "inTimeWindow('09:00', '18:00', 'America/Los_Angeles')")
+	prog := mustCompile(t, env, "dayOfWeek(now, 'America/Los_Angeles') == 'monday'")
 
-	// 2026-03-16 17:00 UTC = 10:00 AM PDT (UTC-7) — inside the window
+	// 2026-03-17 06:00 UTC = 2026-03-16 23:00 PDT (still Monday in LA)
 	ctx := map[string]any{
-		"timestamp": time.Date(2026, 3, 16, 17, 0, 0, 0, time.UTC),
+		"timestamp": time.Date(2026, 3, 17, 6, 0, 0, 0, time.UTC),
 	}
 
 	got, err := prog.Eval(nil, ctx)
@@ -123,6 +140,6 @@ func TestInTimeWindow_CEL(t *testing.T) {
 		t.Fatalf("Eval() error: %v", err)
 	}
 	if !got {
-		t.Error("expected true: 10:00 AM PDT is inside 09:00-18:00 America/Los_Angeles")
+		t.Error("expected true: 2026-03-17 06:00 UTC is Monday in America/Los_Angeles")
 	}
 }
