@@ -158,6 +158,9 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 	var auditDenyMessage string
 	auditDenied := false
 
+	// Track the first redact rule that actually produced mutations.
+	var firstRedactRule string
+
 	for _, cr := range ev.rules {
 		// Check operation glob.
 		if !GlobMatch(cr.rule.Match.Operation, call.Operation) {
@@ -267,6 +270,9 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 		case config.ActionRedact:
 			if cr.rule.Redact != nil && !auditOnly {
 				m := redact.Apply(call.Params, cr.rule.Redact.Target, cr.patterns)
+				if len(m) > 0 && firstRedactRule == "" {
+					firstRedactRule = cr.rule.Name
+				}
 				mutations = append(mutations, m...)
 			}
 		}
@@ -321,6 +327,7 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 
 	return EvalResult{
 		Decision:  returnDecision,
+		Rule:      firstRedactRule,
 		Mutations: returnMutations,
 		Audit: AuditEntry{
 			Timestamp:      call.Context.Timestamp,
