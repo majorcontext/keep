@@ -83,7 +83,6 @@ type compiledRule struct {
 
 // Evaluator runs the rule evaluation loop for a single scope.
 type Evaluator struct {
-	celEnv  *keepcel.Env
 	rules   []compiledRule
 	mode    config.Mode
 	onError config.ErrorMode
@@ -126,7 +125,6 @@ func NewEvaluator(
 	}
 
 	return &Evaluator{
-		celEnv:  celEnv,
 		rules:   compiled,
 		mode:    mode,
 		onError: onError,
@@ -351,7 +349,8 @@ func evalSafe(prog *keepcel.Program, params map[string]any, ctx map[string]any) 
 	return prog.Eval(params, ctx)
 }
 
-// paramsSummary returns a JSON-serialized summary of params, truncated to 256 chars.
+// paramsSummary returns a JSON-serialized summary of params, truncated to 256 runes.
+// When truncated, an ellipsis marker ("...") is appended.
 func paramsSummary(params map[string]any) string {
 	if params == nil {
 		return "{}"
@@ -361,8 +360,9 @@ func paramsSummary(params map[string]any) string {
 		return "{}"
 	}
 	s := string(b)
-	if len(s) > 256 {
-		s = s[:256]
+	runes := []rune(s)
+	if len(runes) > 256 {
+		s = string(runes[:256]) + "..."
 	}
 	return s
 }

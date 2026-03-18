@@ -1,3 +1,10 @@
+// content.go — text-analysis helpers for Keep rule expressions.
+//
+// containsPII and containsAny are fully implemented. containsPHI is a stub for M0
+// and always returns false. The function signature is stable and will be backed by a
+// real implementation in a future milestone. Rules that reference containsPHI() will
+// compile and evaluate successfully but should not be relied upon for enforcement
+// until the implementation lands.
 package cel
 
 import (
