@@ -22,8 +22,8 @@ func TestValidateCmd_ValidDir(t *testing.T) {
 	if err != nil {
 		t.Fatalf("validate valid dir: unexpected error: %v\noutput: %s", err, out)
 	}
-	if !strings.Contains(out, "2 scopes") {
-		t.Errorf("expected output to contain '2 scopes', got: %s", out)
+	if !strings.Contains(out, "3 scopes") {
+		t.Errorf("expected output to contain '3 scopes', got: %s", out)
 	}
 	if !strings.Contains(out, "0 errors") {
 		t.Errorf("expected output to contain '0 errors', got: %s", out)

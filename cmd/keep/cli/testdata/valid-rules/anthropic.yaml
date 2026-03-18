@@ -1,0 +1,18 @@
+scope: anthropic-gateway
+mode: enforce
+rules:
+  - name: redact-secrets
+    match:
+      operation: "llm.tool_result"
+    action: redact
+    redact:
+      target: "params.content"
+      patterns:
+        - match: "AKIA[0-9A-Z]{16}"
+          replace: "[REDACTED:AWS_KEY]"
+  - name: block-destructive-bash
+    match:
+      operation: "llm.tool_use"
+      when: "params.name == 'bash' && params.input.command.contains('rm -rf')"
+    action: deny
+    message: "Destructive command blocked."

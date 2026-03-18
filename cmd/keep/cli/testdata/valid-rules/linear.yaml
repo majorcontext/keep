@@ -6,3 +6,9 @@ rules:
       operation: "delete_issue"
     action: deny
     message: "Issue deletion is not permitted."
+  - name: no-auto-p0
+    match:
+      operation: "create_issue"
+      when: "params.priority == 0"
+    action: deny
+    message: "Automated P0 creation is not permitted."

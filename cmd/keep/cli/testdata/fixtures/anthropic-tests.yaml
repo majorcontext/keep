@@ -1,0 +1,22 @@
+scope: anthropic-gateway
+tests:
+  - name: "redact AWS key in tool result"
+    call:
+      operation: "llm.tool_result"
+      params:
+        content: "KEY=AKIAIOSFODNN7EXAMPLE"
+        tool_name: "bash"
+    expect:
+      decision: redact
+      rule: redact-secrets
+
+  - name: "block destructive bash"
+    call:
+      operation: "llm.tool_use"
+      params:
+        name: "bash"
+        input:
+          command: "rm -rf /data"
+    expect:
+      decision: deny
+      rule: block-destructive-bash
