@@ -97,38 +97,6 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 			),
 		),
 
-		// containsPII(field) bool — matches SSN, credit card, US phone patterns
-		cel.Function("containsPII",
-			cel.Overload(
-				"containsPII_string",
-				[]*cel.Type{cel.StringType},
-				cel.BoolType,
-				cel.UnaryBinding(func(val ref.Val) ref.Val {
-					field, ok := val.(types.String)
-					if !ok {
-						return types.Bool(false)
-					}
-					return types.Bool(ContainsPIIFunc(string(field)))
-				}),
-			),
-		),
-
-		// containsPHI(field) bool — stub, always returns false for M0
-		cel.Function("containsPHI",
-			cel.Overload(
-				"containsPHI_string",
-				[]*cel.Type{cel.StringType},
-				cel.BoolType,
-				cel.UnaryBinding(func(val ref.Val) ref.Val {
-					field, ok := val.(types.String)
-					if !ok {
-						return types.Bool(false)
-					}
-					return types.Bool(ContainsPHIFunc(string(field)))
-				}),
-			),
-		),
-
 		// estimateTokens(field) int — rough token count (len/4)
 		cel.Function("estimateTokens",
 			cel.Overload(

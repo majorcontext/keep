@@ -29,34 +29,6 @@ func TestContainsAny_CaseInsensitive(t *testing.T) {
 	}
 }
 
-func TestContainsPII_SSN(t *testing.T) {
-	got := keepcel.ContainsPIIFunc("my ssn is 123-45-6789")
-	if !got {
-		t.Error("expected true: SSN pattern 123-45-6789 should match")
-	}
-}
-
-func TestContainsPII_CreditCard(t *testing.T) {
-	got := keepcel.ContainsPIIFunc("card 4111111111111111")
-	if !got {
-		t.Error("expected true: Visa credit card number should match")
-	}
-}
-
-func TestContainsPII_Clean(t *testing.T) {
-	got := keepcel.ContainsPIIFunc("nothing sensitive here")
-	if got {
-		t.Error("expected false: no PII patterns in clean text")
-	}
-}
-
-func TestContainsPHI_Stub(t *testing.T) {
-	got := keepcel.ContainsPHIFunc("anything")
-	if got {
-		t.Error("expected false: containsPHI is a stub that always returns false")
-	}
-}
-
 func TestEstimateTokens(t *testing.T) {
 	got := keepcel.EstimateTokensFunc("hello world")
 	// len("hello world") = 11, 11/4 = 2
@@ -76,18 +48,6 @@ func TestContainsAny_CEL(t *testing.T) {
 	}
 	if !got {
 		t.Error("expected true: 'hello' is in 'hello there'")
-	}
-}
-
-func TestContainsPII_CEL(t *testing.T) {
-	env := mustNewEnv(t)
-	prog := mustCompile(t, env, "containsPII(params.content)")
-	got, err := prog.Eval(map[string]any{"content": "ssn 123-45-6789"}, nil)
-	if err != nil {
-		t.Fatalf("Eval() error: %v", err)
-	}
-	if !got {
-		t.Error("expected true: SSN in content should trigger containsPII")
 	}
 }
 
