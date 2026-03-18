@@ -1,0 +1,13 @@
+listen: ":8090"
+rules_dir: "./rules"
+routes:
+  - scope: linear-tools
+    upstream: "https://mcp.linear.app/mcp"
+    auth:
+      type: bearer
+      token_env: "LINEAR_API_KEY"
+  - scope: slack-tools
+    upstream: "https://slack-mcp.example.com"
+log:
+  format: json
+  output: stdout
