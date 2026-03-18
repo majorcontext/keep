@@ -1,0 +1,31 @@
+scope: linear-tools
+tests:
+  - name: "allow normal issue creation"
+    call:
+      operation: "create_issue"
+      params:
+        title: "Fix auth bug"
+        teamId: "TEAM-ENG"
+        priority: 1
+    expect:
+      decision: allow
+
+  - name: "deny P0 creation"
+    call:
+      operation: "create_issue"
+      params:
+        title: "Outage"
+        teamId: "TEAM-ENG"
+        priority: 0
+    expect:
+      decision: deny
+      rule: no-auto-p0
+
+  - name: "deny deletion"
+    call:
+      operation: "delete_issue"
+      params:
+        issueId: "ISSUE-123"
+    expect:
+      decision: deny
+      rule: no-delete
