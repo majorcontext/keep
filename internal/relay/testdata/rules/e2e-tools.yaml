@@ -1,0 +1,12 @@
+scope: e2e-scope
+mode: enforce
+rules:
+  - name: block-tool
+    match:
+      operation: "blocked_tool"
+    action: deny
+    message: "This tool is blocked."
+  - name: audit-all
+    match:
+      operation: "*"
+    action: log
