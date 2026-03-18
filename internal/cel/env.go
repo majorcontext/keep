@@ -8,6 +8,7 @@ import (
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/common/types/traits"
 )
 
 // Env is Keep's configured CEL environment with custom functions.
@@ -53,6 +54,80 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 						return types.Bool(false)
 					}
 					return types.Bool(InTimeWindow(string(start), string(end), string(tz), ts.Time))
+				}),
+			),
+		),
+
+		// containsAny(field, terms) bool — case-insensitive substring match against any term
+		cel.Function("containsAny",
+			cel.Overload(
+				"containsAny_string_list",
+				[]*cel.Type{cel.StringType, cel.ListType(cel.StringType)},
+				cel.BoolType,
+				cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+					field, ok := args[0].(types.String)
+					if !ok {
+						return types.Bool(false)
+					}
+					list, ok2 := args[1].(traits.Lister)
+					if !ok2 {
+						return types.Bool(false)
+					}
+					var terms []string
+					it := list.Iterator()
+					for it.HasNext() == types.True {
+						term := string(it.Next().(types.String))
+						terms = append(terms, term)
+					}
+					return types.Bool(ContainsAnyFunc(string(field), terms))
+				}),
+			),
+		),
+
+		// containsPII(field) bool — matches SSN, credit card, US phone patterns
+		cel.Function("containsPII",
+			cel.Overload(
+				"containsPII_string",
+				[]*cel.Type{cel.StringType},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					field, ok := val.(types.String)
+					if !ok {
+						return types.Bool(false)
+					}
+					return types.Bool(ContainsPIIFunc(string(field)))
+				}),
+			),
+		),
+
+		// containsPHI(field) bool — stub, always returns false for M0
+		cel.Function("containsPHI",
+			cel.Overload(
+				"containsPHI_string",
+				[]*cel.Type{cel.StringType},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					field, ok := val.(types.String)
+					if !ok {
+						return types.Bool(false)
+					}
+					return types.Bool(ContainsPHIFunc(string(field)))
+				}),
+			),
+		),
+
+		// estimateTokens(field) int — rough token count (len/4)
+		cel.Function("estimateTokens",
+			cel.Overload(
+				"estimateTokens_string",
+				[]*cel.Type{cel.StringType},
+				cel.IntType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					field, ok := val.(types.String)
+					if !ok {
+						return types.Int(0)
+					}
+					return types.Int(EstimateTokensFunc(string(field)))
 				}),
 			),
 		),
