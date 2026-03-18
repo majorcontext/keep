@@ -4,14 +4,14 @@ package mcp
 
 type JSONRPCRequest struct {
 	JSONRPC string `json:"jsonrpc"`
-	ID      int    `json:"id"`
+	ID      any    `json:"id"`
 	Method  string `json:"method"`
 	Params  any    `json:"params,omitempty"`
 }
 
 type JSONRPCResponse struct {
 	JSONRPC string        `json:"jsonrpc"`
-	ID      int           `json:"id"`
+	ID      any           `json:"id"`
 	Result  any           `json:"result,omitempty"`
 	Error   *JSONRPCError `json:"error,omitempty"`
 }

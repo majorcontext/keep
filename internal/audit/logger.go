@@ -3,6 +3,7 @@ package audit
 
 import (
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"sync"
@@ -30,7 +31,7 @@ func NewLoggerFromOutput(output string) (*Logger, io.Closer, error) {
 	case "stderr":
 		return NewLogger(os.Stderr), nil, nil
 	default:
-		f, err := os.OpenFile(output, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
+		f, err := os.OpenFile(output, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -43,5 +44,7 @@ func NewLoggerFromOutput(output string) (*Logger, io.Closer, error) {
 func (l *Logger) Log(entry engine.AuditEntry) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	l.enc.Encode(entry) // json.Encoder.Encode adds a newline
+	if err := l.enc.Encode(entry); err != nil {
+		fmt.Fprintf(os.Stderr, "audit: write error: %v\n", err)
+	}
 }

@@ -5,9 +5,11 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"sync/atomic"
+	"time"
 )
 
 // Client is an MCP Streamable HTTP client.
@@ -52,7 +54,7 @@ func WithHeader(headerName, envVar string) ClientOption {
 func NewClient(upstream string, opts ...ClientOption) *Client {
 	c := &Client{
 		url:        upstream,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: 30 * time.Second},
 	}
 	for _, o := range opts {
 		o(c)
@@ -62,10 +64,9 @@ func NewClient(upstream string, opts ...ClientOption) *Client {
 
 // call executes a JSON-RPC request and returns the raw response.
 func (c *Client) call(ctx context.Context, method string, params any) (*JSONRPCResponse, error) {
-	id := int(c.nextID.Add(1))
 	req := JSONRPCRequest{
 		JSONRPC: "2.0",
-		ID:      id,
+		ID:      c.nextID.Add(1),
 		Method:  method,
 		Params:  params,
 	}
@@ -90,6 +91,11 @@ func (c *Client) call(ctx context.Context, method string, params any) (*JSONRPCR
 		return nil, fmt.Errorf("mcp: http: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("mcp: upstream returned HTTP %d: %s", resp.StatusCode, string(body))
+	}
 
 	var rpcResp JSONRPCResponse
 	if err := json.NewDecoder(resp.Body).Decode(&rpcResp); err != nil {
@@ -118,7 +124,7 @@ func unmarshalResult(rpcResp *JSONRPCResponse, dst any) error {
 // Initialize sends an initialize request to the MCP server.
 func (c *Client) Initialize(ctx context.Context) (*InitializeResult, error) {
 	params := InitializeParams{
-		ProtocolVersion: "2024-11-05",
+		ProtocolVersion: "2025-03-26",
 		Capabilities:    map[string]any{},
 		ClientInfo: ClientInfo{
 			Name:    "keep",

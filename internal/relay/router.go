@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 
 	relayconfig "github.com/majorcontext/keep/internal/relay/config"
 	"github.com/majorcontext/keep/internal/relay/mcp"
@@ -29,6 +30,13 @@ func NewRouter(ctx context.Context, routes []relayconfig.Route) (*Router, error)
 	router := &Router{routes: make(map[string]*ToolRoute)}
 
 	for _, route := range routes {
+		// Validate auth env vars are set
+		if route.Auth != nil && route.Auth.TokenEnv != "" {
+			if os.Getenv(route.Auth.TokenEnv) == "" {
+				return nil, fmt.Errorf("relay: route %q: auth env var %q is not set", route.Scope, route.Auth.TokenEnv)
+			}
+		}
+
 		// Build client options from auth config
 		var opts []mcp.ClientOption
 		if route.Auth != nil {

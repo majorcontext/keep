@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 )
 
@@ -34,7 +35,7 @@ func TestClient_Initialize(t *testing.T) {
 			JSONRPC: "2.0",
 			ID:      req.ID,
 			Result: map[string]any{
-				"protocolVersion": "2024-11-05",
+				"protocolVersion": "2025-03-26",
 				"capabilities": map[string]any{
 					"tools": map[string]any{"listChanged": true},
 				},
@@ -52,8 +53,8 @@ func TestClient_Initialize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Initialize: %v", err)
 	}
-	if result.ProtocolVersion != "2024-11-05" {
-		t.Errorf("got protocol version %q, want %q", result.ProtocolVersion, "2024-11-05")
+	if result.ProtocolVersion != "2025-03-26" {
+		t.Errorf("got protocol version %q, want %q", result.ProtocolVersion, "2025-03-26")
 	}
 	if result.ServerInfo.Name != "test-server" {
 		t.Errorf("got server name %q, want %q", result.ServerInfo.Name, "test-server")
@@ -152,6 +153,23 @@ func TestClient_CallTool_Error(t *testing.T) {
 	_, err := c.CallTool(context.Background(), "nonexistent", nil)
 	if err == nil {
 		t.Fatal("expected error, got nil")
+	}
+}
+
+func TestClient_HTTPError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("service down"))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL)
+	_, err := c.Initialize(context.Background())
+	if err == nil {
+		t.Fatal("expected error for HTTP 503, got nil")
+	}
+	if !strings.Contains(err.Error(), "503") {
+		t.Errorf("expected error to mention status code 503, got: %v", err)
 	}
 }
 

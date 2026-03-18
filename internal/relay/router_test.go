@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -182,6 +183,30 @@ func TestRouter_MergedToolList(t *testing.T) {
 		if !names[want] {
 			t.Errorf("Tools() missing %q", want)
 		}
+	}
+}
+
+func TestRouter_MissingAuthToken(t *testing.T) {
+	const envVar = "TEST_MISSING_AUTH_TOKEN_VAR"
+	os.Unsetenv(envVar)
+
+	routes := []relayconfig.Route{
+		{
+			Scope:    "authed-scope",
+			Upstream: "https://example.com",
+			Auth: &relayconfig.Auth{
+				Type:     "bearer",
+				TokenEnv: envVar,
+			},
+		},
+	}
+
+	_, err := NewRouter(context.Background(), routes)
+	if err == nil {
+		t.Fatal("expected error for missing auth token env var, got nil")
+	}
+	if !strings.Contains(err.Error(), envVar) {
+		t.Errorf("expected error to mention env var %q, got: %v", envVar, err)
 	}
 }
 

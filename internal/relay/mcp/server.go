@@ -34,6 +34,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 4<<20) // 4 MB limit
+
 	var req JSONRPCRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeJSONRPC(w, JSONRPCResponse{
@@ -82,7 +84,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		resp.Result = result
 
 	default:
-		resp.Error = &JSONRPCError{Code: -32601, Message: "Method not found: " + req.Method}
+		method := req.Method
+		if len(method) > 64 {
+			method = method[:64] + "..."
+		}
+		resp.Error = &JSONRPCError{Code: -32601, Message: "Method not found: " + method}
 	}
 
 	writeJSONRPC(w, resp)

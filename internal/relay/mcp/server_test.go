@@ -72,8 +72,8 @@ func TestServer_Initialize(t *testing.T) {
 	if resp.Error != nil {
 		t.Fatalf("unexpected error: %+v", resp.Error)
 	}
-	if resp.ID != 1 {
-		t.Errorf("expected ID 1, got %d", resp.ID)
+	if resp.ID != float64(1) {
+		t.Errorf("expected ID 1, got %v", resp.ID)
 	}
 
 	resultBytes, _ := json.Marshal(resp.Result)
@@ -224,6 +224,29 @@ func TestServer_InvalidMethod(t *testing.T) {
 	}
 	if resp.Error.Code != -32601 {
 		t.Errorf("expected error code -32601, got %d", resp.Error.Code)
+	}
+}
+
+func TestServer_OversizedBody(t *testing.T) {
+	srv := NewServer(testTools, &mockHandler{})
+
+	// Create a body larger than 4MB
+	bigBody := make([]byte, 5<<20) // 5 MB
+	for i := range bigBody {
+		bigBody[i] = 'a'
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/", bytes.NewReader(bigBody))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	resp := decodeResponse(t, w)
+	if resp.Error == nil {
+		t.Fatal("expected error for oversized body, got nil")
+	}
+	if resp.Error.Code != -32700 {
+		t.Errorf("expected error code -32700, got %d", resp.Error.Code)
 	}
 }
 
