@@ -1,4 +1,4 @@
-.PHONY: all help build build-cli build-relay build-gateway test test-unit test-e2e lint fix clean coverage snapshot
+.PHONY: all help build build-cli build-relay build-gateway test test-unit test-e2e test-integration lint fix clean coverage snapshot
 
 # Default target - running "make" shows help
 all: help
@@ -34,6 +34,9 @@ test-unit: ## Run unit tests with race detector (use ARGS for filtering, e.g., A
 
 test-e2e: ## Run E2E tests (use ARGS for filtering, e.g., ARGS='-run TestName')
 	go test -tags=e2e $(ARGS) ./internal/e2e/
+
+test-integration: ## Run integration tests (builds CLI binary)
+	go test -tags=integration -v ./cmd/keep/cli/
 
 lint: ## Run linter (requires golangci-lint v2)
 	@which golangci-lint > /dev/null || (echo "golangci-lint not installed. Install from https://golangci-lint.run/usage/install/" && exit 1)
