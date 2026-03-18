@@ -3,12 +3,14 @@ package cel
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/cel-go/cel"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
+	"github.com/majorcontext/keep/internal/rate"
 )
 
 // Env is Keep's configured CEL environment with custom functions.
@@ -20,13 +22,24 @@ type Env struct {
 type EnvOption func(*envConfig)
 
 type envConfig struct {
-	// will hold rate store etc. in future tasks
+	rateStore *rate.Store
+}
+
+// WithRateStore configures the CEL environment with a rate counter store,
+// enabling the rateCount(key, window) function.
+func WithRateStore(store *rate.Store) EnvOption {
+	return func(cfg *envConfig) {
+		cfg.rateStore = store
+	}
 }
 
 // NewEnv creates a new CEL environment with Keep's input variables
 // (params, context) and all custom functions registered.
 func NewEnv(opts ...EnvOption) (*Env, error) {
-	_ = &envConfig{} // apply options in future tasks
+	cfg := &envConfig{}
+	for _, opt := range opts {
+		opt(cfg)
+	}
 
 	env, err := cel.NewEnv(
 		// params and context are dynamic maps: any field access works at runtime.
@@ -132,6 +145,26 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 			),
 		),
 
+		// rateCount(key, window) int — increment counter and return hit count within window.
+		// window is a string like "1h", "30m", "30s". Max 24h, min 1s.
+		// If no rate store is configured, returns an error at eval time.
+		cel.Function("rateCount",
+			cel.Overload(
+				"rateCount_string_string",
+				[]*cel.Type{cel.StringType, cel.StringType},
+				cel.IntType,
+				cel.BinaryBinding(func(key, window ref.Val) ref.Val {
+					k := string(key.(types.String))
+					w := string(window.(types.String))
+					count, err := rateCountFunc(cfg.rateStore, k, w)
+					if err != nil {
+						return types.WrapErr(err)
+					}
+					return types.Int(count)
+				}),
+			),
+		),
+
 		// dayOfWeek(_timestamp) string — UTC weekday name
 		cel.Function("dayOfWeek",
 			cel.Overload(
@@ -221,7 +254,11 @@ func (p *Program) Eval(params map[string]any, ctx map[string]any) (bool, error) 
 	if err != nil {
 		// Treat missing field / no such key errors as false so that expressions
 		// like `params.missing == 'x'` are safe when the key is absent.
-		return false, nil
+		msg := err.Error()
+		if strings.Contains(msg, "no such key") || strings.Contains(msg, "no such field") || strings.Contains(msg, "undefined field") {
+			return false, nil
+		}
+		return false, err
 	}
 
 	bv, ok := out.(types.Bool)
