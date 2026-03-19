@@ -1,0 +1,12 @@
+scope: test-defs
+mode: enforce
+defs:
+  allowed_teams: "['TEAM-ENG', 'TEAM-INFRA']"
+  max_priority: "1"
+rules:
+  - name: team-check
+    match:
+      operation: "create"
+      when: "!(params.team in allowed_teams)"
+    action: deny
+    message: "Team not allowed."

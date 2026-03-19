@@ -7,6 +7,7 @@ import (
 )
 
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
+var defNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 const (
 	maxNameLen           = 64
@@ -51,6 +52,11 @@ func Validate(rf *RuleFile) error {
 				seen[rule.Name] = true
 			}
 		}
+	}
+
+	// defs validation
+	if len(rf.Defs) > 0 {
+		errs = append(errs, validateDefs(rf.Defs)...)
 	}
 
 	// 9. mode if set must be "enforce" or "audit_only"
@@ -103,6 +109,66 @@ func validateRule(i int, rule Rule) []error {
 		errs = append(errs, fmt.Errorf("rules[%d]: when expression exceeds maximum length of %d", i, maxWhenLen))
 	}
 
+	return errs
+}
+
+// reservedDefNames are identifiers that must not be used as def names because
+// they shadow CEL built-in variables or functions used by Keep.
+var reservedDefNames = map[string]bool{
+	"params":         true,
+	"context":        true,
+	"now":            true,
+	"size":           true,
+	"has":            true,
+	"matches":        true,
+	"startsWith":     true,
+	"endsWith":       true,
+	"contains":       true,
+	"containsAny":    true,
+	"estimateTokens": true,
+	"inTimeWindow":   true,
+	"rateCount":      true,
+	"lower":          true,
+	"upper":          true,
+	"matchesDomain":  true,
+	"dayOfWeek":      true,
+	"int":            true,
+	"uint":           true,
+	"double":         true,
+	"bool":           true,
+	"string":         true,
+	"bytes":          true,
+	"list":           true,
+	"map":            true,
+	"type":           true,
+	"null_type":      true,
+	"true":           true,
+	"false":          true,
+	"null":           true,
+}
+
+func validateDefs(defs map[string]string) []error {
+	var errs []error
+	for name, value := range defs {
+		// Name must match [a-z][a-z0-9_]*
+		if !defNameRe.MatchString(name) {
+			errs = append(errs, fmt.Errorf("defs: name %q is invalid (must match [a-z][a-z0-9_]*)", name))
+		} else if len(name) > maxNameLen {
+			errs = append(errs, fmt.Errorf("defs: name %q exceeds maximum length of %d", name, maxNameLen))
+		}
+
+		// Name must not shadow built-in variables or functions
+		if reservedDefNames[name] {
+			errs = append(errs, fmt.Errorf("defs: name %q shadows a built-in variable or function", name))
+		}
+
+		// Value must be non-empty
+		if value == "" {
+			errs = append(errs, fmt.Errorf("defs: value for %q must not be empty", name))
+		} else if len(value) > maxWhenLen {
+			errs = append(errs, fmt.Errorf("defs: value for %q exceeds maximum length of %d", name, maxWhenLen))
+		}
+	}
 	return errs
 }
 

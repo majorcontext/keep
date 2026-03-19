@@ -126,6 +126,26 @@ rules:
 	}
 }
 
+func TestLoadRules_WithDefs(t *testing.T) {
+	result, err := LoadRules("testdata/rules-with-defs")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	rf, ok := result["test-defs"]
+	if !ok {
+		t.Fatal("expected scope test-defs to be present")
+	}
+	if len(rf.Defs) != 2 {
+		t.Fatalf("expected 2 defs, got %d", len(rf.Defs))
+	}
+	if rf.Defs["allowed_teams"] != "['TEAM-ENG', 'TEAM-INFRA']" {
+		t.Errorf("allowed_teams = %q, want %q", rf.Defs["allowed_teams"], "['TEAM-ENG', 'TEAM-INFRA']")
+	}
+	if rf.Defs["max_priority"] != "1" {
+		t.Errorf("max_priority = %q, want %q", rf.Defs["max_priority"], "1")
+	}
+}
+
 func TestLoadRules_FileSizeCap(t *testing.T) {
 	dir := t.TempDir()
 

@@ -416,3 +416,96 @@ func TestValidate_TooManyPatternsPerRedact(t *testing.T) {
 	}
 }
 
+func TestValidate_DefsValid(t *testing.T) {
+	rf := &RuleFile{
+		Scope: "my-scope",
+		Defs: map[string]string{
+			"allowed_teams": "['TEAM-ENG', 'TEAM-INFRA']",
+			"max_priority":  "1",
+		},
+		Rules: []Rule{
+			{Name: "my-rule", Action: ActionDeny},
+		},
+	}
+	if err := Validate(rf); err != nil {
+		t.Fatalf("Validate() = %v, want nil", err)
+	}
+}
+
+func TestValidate_DefsBadName(t *testing.T) {
+	tests := []struct {
+		name        string
+		defName     string
+		errContains string
+	}{
+		{"uppercase", "MyDef", "invalid"},
+		{"starts with number", "1abc", "invalid"},
+		{"contains hyphen", "my-def", "invalid"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rf := &RuleFile{
+				Scope: "my-scope",
+				Defs:  map[string]string{tt.defName: "'value'"},
+				Rules: []Rule{{Name: "my-rule", Action: ActionDeny}},
+			}
+			err := Validate(rf)
+			if err == nil {
+				t.Fatalf("Validate() = nil, want error containing %q", tt.errContains)
+			}
+			if !strings.Contains(err.Error(), tt.errContains) {
+				t.Errorf("Validate() error = %q, want it to contain %q", err.Error(), tt.errContains)
+			}
+		})
+	}
+}
+
+func TestValidate_DefsShadowsBuiltin(t *testing.T) {
+	for _, name := range []string{"params", "context", "now", "size", "true", "false"} {
+		t.Run(name, func(t *testing.T) {
+			rf := &RuleFile{
+				Scope: "my-scope",
+				Defs:  map[string]string{name: "'value'"},
+				Rules: []Rule{{Name: "my-rule", Action: ActionDeny}},
+			}
+			err := Validate(rf)
+			if err == nil {
+				t.Fatalf("Validate() = nil, want error for shadowed name %q", name)
+			}
+			if !strings.Contains(err.Error(), "shadows") {
+				t.Errorf("Validate() error = %q, want it to contain %q", err.Error(), "shadows")
+			}
+		})
+	}
+}
+
+func TestValidate_DefsEmptyValue(t *testing.T) {
+	rf := &RuleFile{
+		Scope: "my-scope",
+		Defs:  map[string]string{"my_def": ""},
+		Rules: []Rule{{Name: "my-rule", Action: ActionDeny}},
+	}
+	err := Validate(rf)
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for empty def value")
+	}
+	if !strings.Contains(err.Error(), "must not be empty") {
+		t.Errorf("Validate() error = %q, want it to contain %q", err.Error(), "must not be empty")
+	}
+}
+
+func TestValidate_DefsValueTooLong(t *testing.T) {
+	rf := &RuleFile{
+		Scope: "my-scope",
+		Defs:  map[string]string{"my_def": strings.Repeat("x", 2049)},
+		Rules: []Rule{{Name: "my-rule", Action: ActionDeny}},
+	}
+	err := Validate(rf)
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for too-long def value")
+	}
+	if !strings.Contains(err.Error(), "exceeds maximum") {
+		t.Errorf("Validate() error = %q, want it to contain %q", err.Error(), "exceeds maximum")
+	}
+}
+
