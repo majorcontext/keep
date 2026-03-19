@@ -3,6 +3,8 @@ package engine
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
+	"strings"
 	"time"
 
 	keepcel "github.com/majorcontext/keep/internal/cel"
@@ -123,6 +125,18 @@ func NewEvaluator(
 
 		compiled = append(compiled, cr)
 	}
+
+	// Rules are evaluated in specificity order (most-specific first):
+	//   1. Exact operation match (e.g., "delete_issue")
+	//   2. Glob patterns (e.g., "create_*", "llm.*")
+	//   3. Catch-all (empty operation, matches everything)
+	// Within the same tier, rules preserve their order from the rule file.
+	// This ensures that a specific "no-push-main" deny fires before a
+	// broader "branch-restriction" deny, regardless of file order.
+	sort.SliceStable(compiled, func(i, j int) bool {
+		return operationSpecificity(compiled[i].rule.Match.Operation) <
+			operationSpecificity(compiled[j].rule.Match.Operation)
+	})
 
 	return &Evaluator{
 		rules:   compiled,
@@ -354,6 +368,22 @@ func evalSafe(prog *keepcel.Program, params map[string]any, ctx map[string]any) 
 		}
 	}()
 	return prog.Eval(params, ctx)
+}
+
+// operationSpecificity returns a sort key for a rule's operation pattern.
+// Lower values = more specific = evaluated first.
+//
+//	0: exact match (no wildcards)
+//	1: glob pattern (contains * or ?)
+//	2: empty/catch-all (matches everything)
+func operationSpecificity(pattern string) int {
+	if pattern == "" {
+		return 2
+	}
+	if strings.ContainsAny(pattern, "*?") {
+		return 1
+	}
+	return 0
 }
 
 // paramsSummary returns a JSON-serialized summary of params, truncated to 256 runes.

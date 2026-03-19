@@ -297,3 +297,84 @@ func TestEval_AuditAlwaysPopulated(t *testing.T) {
 		})
 	}
 }
+
+func TestEval_SpecificityOrder(t *testing.T) {
+	// Broad glob rule comes first in file, exact rule comes second.
+	// The exact rule should fire first due to specificity ordering.
+	rules := []config.Rule{
+		{
+			Name:    "broad-deny",
+			Action:  config.ActionDeny,
+			Match:   config.Match{Operation: "*"},
+			Message: "broad deny",
+		},
+		{
+			Name:    "exact-deny",
+			Action:  config.ActionDeny,
+			Match:   config.Match{Operation: "delete_issue"},
+			Message: "exact deny",
+		},
+	}
+	ev := makeEvaluator(t, rules)
+	result := ev.Evaluate(makeCall("delete_issue", nil))
+	if result.Decision != Deny {
+		t.Fatalf("expected Deny, got %s", result.Decision)
+	}
+	if result.Rule != "exact-deny" {
+		t.Errorf("expected exact-deny to fire first, got %s", result.Rule)
+	}
+}
+
+func TestEval_SpecificityPreservesFileOrder(t *testing.T) {
+	// Two exact rules at the same specificity tier.
+	// The first one in the file should fire first (stable sort).
+	rules := []config.Rule{
+		{
+			Name:    "first-exact",
+			Action:  config.ActionDeny,
+			Match:   config.Match{Operation: "delete_issue"},
+			Message: "first",
+		},
+		{
+			Name:    "second-exact",
+			Action:  config.ActionDeny,
+			Match:   config.Match{Operation: "delete_issue"},
+			Message: "second",
+		},
+	}
+	ev := makeEvaluator(t, rules)
+	result := ev.Evaluate(makeCall("delete_issue", nil))
+	if result.Decision != Deny {
+		t.Fatalf("expected Deny, got %s", result.Decision)
+	}
+	if result.Rule != "first-exact" {
+		t.Errorf("expected first-exact to fire first (stable sort), got %s", result.Rule)
+	}
+}
+
+func TestEval_SpecificityGlobBeforeCatchAll(t *testing.T) {
+	// Catch-all rule (no operation) comes first in file, glob rule comes second.
+	// The glob rule should fire first due to specificity ordering.
+	rules := []config.Rule{
+		{
+			Name:    "catch-all",
+			Action:  config.ActionDeny,
+			Match:   config.Match{},
+			Message: "catch-all deny",
+		},
+		{
+			Name:    "glob-deny",
+			Action:  config.ActionDeny,
+			Match:   config.Match{Operation: "create_*"},
+			Message: "glob deny",
+		},
+	}
+	ev := makeEvaluator(t, rules)
+	result := ev.Evaluate(makeCall("create_issue", nil))
+	if result.Decision != Deny {
+		t.Fatalf("expected Deny, got %s", result.Decision)
+	}
+	if result.Rule != "glob-deny" {
+		t.Errorf("expected glob-deny to fire before catch-all, got %s", result.Rule)
+	}
+}
