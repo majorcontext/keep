@@ -55,7 +55,10 @@ func TestWriter_WriteEvent(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			w := NewWriter(rec)
+			w, err := NewWriter(rec)
+			if err != nil {
+				t.Fatalf("NewWriter: %v", err)
+			}
 			if err := w.WriteEvent(tt.event); err != nil {
 				t.Fatalf("WriteEvent error: %v", err)
 			}
@@ -69,7 +72,10 @@ func TestWriter_WriteEvent(t *testing.T) {
 
 func TestWriter_SetHeaders(t *testing.T) {
 	rec := httptest.NewRecorder()
-	w := NewWriter(rec)
+	w, err := NewWriter(rec)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
 	w.SetHeaders()
 
 	resp := rec.Result()
@@ -92,7 +98,10 @@ func TestWriter_Flush(t *testing.T) {
 		ResponseWriter: httptest.NewRecorder(),
 		onFlush:        func() { flushed = true },
 	}
-	w := NewWriter(fw)
+	w, err := NewWriter(fw)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
 	_ = w.WriteEvent(Event{Data: "test"})
 	if !flushed {
 		t.Error("WriteEvent did not flush")
@@ -100,10 +109,9 @@ func TestWriter_Flush(t *testing.T) {
 }
 
 func TestWriter_NoFlusher(t *testing.T) {
-	// A ResponseWriter that does not implement http.Flusher should cause an error.
+	// A ResponseWriter that does not implement http.Flusher should cause an error from NewWriter.
 	nf := &noFlushWriter{header: make(http.Header)}
-	w := NewWriter(nf)
-	err := w.WriteEvent(Event{Data: "test"})
+	_, err := NewWriter(nf)
 	if err == nil {
 		t.Fatal("expected error for non-flushable writer, got nil")
 	}
@@ -111,8 +119,11 @@ func TestWriter_NoFlusher(t *testing.T) {
 
 func TestWriter_WriteError(t *testing.T) {
 	fw := &failWriter{header: make(http.Header)}
-	w := NewWriter(fw)
-	err := w.WriteEvent(Event{Data: "test"})
+	w, err := NewWriter(fw)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
+	err = w.WriteEvent(Event{Data: "test"})
 	if err == nil {
 		t.Fatal("expected error from failing writer, got nil")
 	}
@@ -160,7 +171,10 @@ func TestRoundTrip(t *testing.T) {
 
 	// Write events to a recorder.
 	rec := httptest.NewRecorder()
-	w := NewWriter(rec)
+	w, err := NewWriter(rec)
+	if err != nil {
+		t.Fatalf("NewWriter: %v", err)
+	}
 	for _, ev := range events {
 		if err := w.WriteEvent(ev); err != nil {
 			t.Fatalf("WriteEvent: %v", err)

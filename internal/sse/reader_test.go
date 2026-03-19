@@ -1,6 +1,7 @@
 package sse
 
 import (
+	"errors"
 	"io"
 	"strings"
 	"testing"
@@ -129,4 +130,30 @@ func TestReader_Next(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestReader_ScannerError(t *testing.T) {
+	r := NewReader(&errReader{
+		data: "data: hello\n",
+		err:  errors.New("connection reset"),
+	})
+	_, err := r.Next()
+	if err == nil || err.Error() != "connection reset" {
+		t.Fatalf("expected 'connection reset' error, got: %v", err)
+	}
+}
+
+type errReader struct {
+	data string
+	err  error
+	done bool
+}
+
+func (r *errReader) Read(p []byte) (int, error) {
+	if r.done {
+		return 0, r.err
+	}
+	r.done = true
+	n := copy(p, r.data)
+	return n, nil
 }

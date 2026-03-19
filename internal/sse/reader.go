@@ -22,7 +22,7 @@ func NewReader(r io.Reader) *Reader {
 func (r *Reader) Next() (Event, error) {
 	var ev Event
 	var hasFields bool
-	var dataSet bool
+	var dataLines []string
 
 	for r.scanner.Scan() {
 		line := r.scanner.Text()
@@ -30,6 +30,7 @@ func (r *Reader) Next() (Event, error) {
 		// Blank line = event boundary.
 		if line == "" {
 			if hasFields {
+				ev.Data = strings.Join(dataLines, "\n")
 				return ev, nil
 			}
 			continue
@@ -48,12 +49,7 @@ func (r *Reader) Next() (Event, error) {
 			ev.Type = value
 			hasFields = true
 		case "data":
-			if dataSet {
-				ev.Data += "\n" + value
-			} else {
-				ev.Data = value
-				dataSet = true
-			}
+			dataLines = append(dataLines, value)
 			hasFields = true
 		case "id":
 			ev.ID = value
@@ -61,8 +57,8 @@ func (r *Reader) Next() (Event, error) {
 		case "retry":
 			if n, err := strconv.Atoi(value); err == nil && n >= 0 {
 				ev.Retry = n
+				hasFields = true
 			}
-			hasFields = true
 		default:
 			// Unknown field names are ignored per spec.
 		}
@@ -74,6 +70,7 @@ func (r *Reader) Next() (Event, error) {
 
 	// EOF: return final event if it had fields.
 	if hasFields {
+		ev.Data = strings.Join(dataLines, "\n")
 		return ev, nil
 	}
 	return Event{}, io.EOF
