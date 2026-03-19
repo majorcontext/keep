@@ -133,6 +133,28 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 			),
 		),
 
+		// lower(string) -> string
+		cel.Function("lower",
+			cel.Overload("lower_string",
+				[]*cel.Type{cel.StringType},
+				cel.StringType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					return types.String(LowerFunc(string(val.(types.String))))
+				}),
+			),
+		),
+
+		// upper(string) -> string
+		cel.Function("upper",
+			cel.Overload("upper_string",
+				[]*cel.Type{cel.StringType},
+				cel.StringType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					return types.String(UpperFunc(string(val.(types.String))))
+				}),
+			),
+		),
+
 		// dayOfWeek(now) string — UTC weekday name
 		cel.Function("dayOfWeek",
 			cel.Overload(
