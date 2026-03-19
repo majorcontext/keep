@@ -155,6 +155,24 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 			),
 		),
 
+		// matchesDomain(string, list(string)) -> bool
+		cel.Function("matchesDomain",
+			cel.Overload("matchesDomain_string_list",
+				[]*cel.Type{cel.StringType, cel.ListType(cel.StringType)},
+				cel.BoolType,
+				cel.BinaryBinding(func(email, domains ref.Val) ref.Val {
+					e := string(email.(types.String))
+					list := domains.(traits.Lister)
+					var ds []string
+					it := list.Iterator()
+					for it.HasNext() == types.True {
+						ds = append(ds, string(it.Next().(types.String)))
+					}
+					return types.Bool(MatchesDomainFunc(e, ds))
+				}),
+			),
+		),
+
 		// dayOfWeek(now) string — UTC weekday name
 		cel.Function("dayOfWeek",
 			cel.Overload(
