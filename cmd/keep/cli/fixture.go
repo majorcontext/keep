@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -37,7 +36,7 @@ type FixtureContext struct {
 	Scope     string            `yaml:"scope,omitempty"`
 	Direction string            `yaml:"direction,omitempty"`
 	Labels    map[string]string `yaml:"labels,omitempty"`
-	Timestamp time.Time         `yaml:"-"` // always set at evaluation time
+	Timestamp string            `yaml:"timestamp,omitempty"` // RFC3339 format
 }
 
 // Expectation is the expected evaluation result.
@@ -126,9 +125,6 @@ func parseFixtureFile(path string) (FixtureFile, error) {
 		if tc.Call.Context.AgentID == "" {
 			tc.Call.Context.AgentID = "test"
 		}
-
-		// Timestamp is always set at evaluation time.
-		tc.Call.Context.Timestamp = time.Now()
 
 		f.Tests[i] = tc
 	}

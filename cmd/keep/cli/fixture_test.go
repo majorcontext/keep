@@ -191,6 +191,58 @@ tests:
 	}
 }
 
+func TestLoadFixtures_Timestamp(t *testing.T) {
+	dir := t.TempDir()
+	content := `
+scope: test-scope
+tests:
+  - name: "test with explicit timestamp"
+    call:
+      operation: "do_thing"
+      params: {}
+      context:
+        timestamp: "2026-03-18T02:00:00Z"
+    expect:
+      decision: allow
+  - name: "test with no timestamp"
+    call:
+      operation: "do_thing"
+      params: {}
+    expect:
+      decision: allow
+`
+	fp := filepath.Join(dir, "test.yaml")
+	if err := os.WriteFile(fp, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	files, err := LoadFixtures(fp)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(files) != 1 {
+		t.Fatalf("expected 1 file, got %d", len(files))
+	}
+
+	// First test: explicit timestamp should be preserved.
+	tc0 := files[0].Tests[0]
+	if tc0.Call.Context == nil {
+		t.Fatal("expected context to be set")
+	}
+	if tc0.Call.Context.Timestamp != "2026-03-18T02:00:00Z" {
+		t.Errorf("expected timestamp '2026-03-18T02:00:00Z', got %q", tc0.Call.Context.Timestamp)
+	}
+
+	// Second test: no timestamp specified, field should be empty.
+	tc1 := files[0].Tests[1]
+	if tc1.Call.Context == nil {
+		t.Fatal("expected context to be initialized")
+	}
+	if tc1.Call.Context.Timestamp != "" {
+		t.Errorf("expected empty timestamp, got %q", tc1.Call.Context.Timestamp)
+	}
+}
+
 func TestLoadFixtures_SingleFile(t *testing.T) {
 	dir := t.TempDir()
 	content := `

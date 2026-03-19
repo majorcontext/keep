@@ -75,9 +75,20 @@ func runTest(cmd *cobra.Command, args []string) error {
 			total++
 
 			// Build the call context.
+			ts := time.Now()
+			if tc.Call.Context != nil && tc.Call.Context.Timestamp != "" {
+				parsed, err := time.Parse(time.RFC3339, tc.Call.Context.Timestamp)
+				if err != nil {
+					fmt.Fprintf(cmd.ErrOrStderr(), "  FAIL  %s\n        invalid timestamp: %v\n", tc.Name, err)
+					failed++
+					continue
+				}
+				ts = parsed
+			}
+
 			ctx := keep.CallContext{
 				AgentID:   "test",
-				Timestamp: time.Now(),
+				Timestamp: ts,
 			}
 			if tc.Call.Context != nil {
 				if tc.Call.Context.AgentID != "" {
