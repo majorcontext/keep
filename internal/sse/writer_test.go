@@ -2,8 +2,10 @@ package sse
 
 import (
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -145,3 +147,46 @@ func (f *failWriter) Header() http.Header        { return f.header }
 func (f *failWriter) Write([]byte) (int, error)  { return 0, errors.New("write failed") }
 func (f *failWriter) WriteHeader(int)            {}
 func (f *failWriter) Flush()                     {}
+
+func TestRoundTrip(t *testing.T) {
+	events := []Event{
+		{Type: "message_start", Data: `{"type":"message_start"}`},
+		{Type: "content_block_start", Data: `{"type":"content_block_start","index":0}`},
+		{Type: "content_block_delta", Data: `{"type":"content_block_delta","delta":{"text":"Hello"}}`},
+		{Type: "content_block_stop", Data: `{"type":"content_block_stop","index":0}`},
+		{Type: "message_delta", Data: `{"type":"message_delta","delta":{"stop_reason":"end_turn"}}`},
+		{Type: "message_stop", Data: `{"type":"message_stop"}`},
+	}
+
+	// Write events to a recorder.
+	rec := httptest.NewRecorder()
+	w := NewWriter(rec)
+	for _, ev := range events {
+		if err := w.WriteEvent(ev); err != nil {
+			t.Fatalf("WriteEvent: %v", err)
+		}
+	}
+
+	// Parse them back.
+	r := NewReader(strings.NewReader(rec.Body.String()))
+	var got []Event
+	for {
+		ev, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			t.Fatalf("unexpected error during read-back: %v", err)
+		}
+		got = append(got, ev)
+	}
+
+	if len(got) != len(events) {
+		t.Fatalf("round-trip: got %d events, want %d", len(got), len(events))
+	}
+	for i := range got {
+		if got[i] != events[i] {
+			t.Errorf("event[%d]\ngot:  %+v\nwant: %+v", i, got[i], events[i])
+		}
+	}
+}
