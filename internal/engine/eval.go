@@ -101,6 +101,7 @@ func NewEvaluator(
 	onError config.ErrorMode,
 	rules []config.Rule,
 	aliases map[string]string,
+	defs map[string]string,
 ) (*Evaluator, error) {
 	compiled := make([]compiledRule, 0, len(rules))
 	for _, r := range rules {
@@ -108,6 +109,7 @@ func NewEvaluator(
 
 		if r.Match.When != "" {
 			resolved := keepcel.ResolveAliases(r.Match.When, aliases)
+			resolved = keepcel.ResolveAliases(resolved, defs)
 			prog, err := celEnv.Compile(resolved)
 			if err != nil {
 				return nil, fmt.Errorf("rule %q: compile when: %w", r.Name, err)

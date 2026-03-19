@@ -210,6 +210,85 @@ func TestApplyMutations(t *testing.T) {
 	}
 }
 
+func TestLoad_WithDefs(t *testing.T) {
+	eng, err := keep.Load("testdata/rules-with-defs")
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	defer eng.Close()
+
+	scopes := eng.Scopes()
+	if len(scopes) != 1 || scopes[0] != "test-defs" {
+		t.Fatalf("Scopes() = %v, want [test-defs]", scopes)
+	}
+
+	// Allowed team => allow
+	result, err := eng.Evaluate(keep.Call{
+		Operation: "create_issue",
+		Params:    map[string]any{"team": "TEAM-ENG", "priority": int64(1)},
+	}, "test-defs")
+	if err != nil {
+		t.Fatalf("Evaluate() error: %v", err)
+	}
+	if result.Decision != keep.Allow {
+		t.Errorf("Decision = %q, want %q for allowed team", result.Decision, keep.Allow)
+	}
+
+	// Disallowed team => deny
+	result, err = eng.Evaluate(keep.Call{
+		Operation: "create_issue",
+		Params:    map[string]any{"team": "TEAM-SALES", "priority": int64(1)},
+	}, "test-defs")
+	if err != nil {
+		t.Fatalf("Evaluate() error: %v", err)
+	}
+	if result.Decision != keep.Deny {
+		t.Errorf("Decision = %q, want %q for disallowed team", result.Decision, keep.Deny)
+	}
+	if result.Rule != "team-check" {
+		t.Errorf("Rule = %q, want %q", result.Rule, "team-check")
+	}
+
+	// Priority too high => deny
+	result, err = eng.Evaluate(keep.Call{
+		Operation: "create_issue",
+		Params:    map[string]any{"team": "TEAM-ENG", "priority": int64(5)},
+	}, "test-defs")
+	if err != nil {
+		t.Fatalf("Evaluate() error: %v", err)
+	}
+	if result.Decision != keep.Deny {
+		t.Errorf("Decision = %q, want %q for high priority", result.Decision, keep.Deny)
+	}
+	if result.Rule != "priority-check" {
+		t.Errorf("Rule = %q, want %q", result.Rule, "priority-check")
+	}
+
+	// Agent branch prefix => deny
+	result, err = eng.Evaluate(keep.Call{
+		Operation: "push",
+		Params:    map[string]any{"branch": "agent/fix-123"},
+	}, "test-defs")
+	if err != nil {
+		t.Fatalf("Evaluate() error: %v", err)
+	}
+	if result.Decision != keep.Deny {
+		t.Errorf("Decision = %q, want %q for agent branch", result.Decision, keep.Deny)
+	}
+
+	// Non-agent branch => allow
+	result, err = eng.Evaluate(keep.Call{
+		Operation: "push",
+		Params:    map[string]any{"branch": "main"},
+	}, "test-defs")
+	if err != nil {
+		t.Fatalf("Evaluate() error: %v", err)
+	}
+	if result.Decision != keep.Allow {
+		t.Errorf("Decision = %q, want %q for main branch", result.Decision, keep.Allow)
+	}
+}
+
 func TestReload(t *testing.T) {
 	// Copy existing rules to a temp dir.
 	dir := t.TempDir()

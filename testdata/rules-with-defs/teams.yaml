@@ -1,0 +1,29 @@
+scope: test-defs
+mode: enforce
+
+defs:
+  allowed_teams: "['TEAM-ENG', 'TEAM-INFRA']"
+  max_priority: "1"
+  agent_prefix: "'agent/'"
+
+rules:
+  - name: team-check
+    match:
+      operation: "create_issue"
+      when: "!(params.team in allowed_teams)"
+    action: deny
+    message: "Team not allowed."
+
+  - name: priority-check
+    match:
+      operation: "create_issue"
+      when: "params.priority > max_priority"
+    action: deny
+    message: "Priority too high."
+
+  - name: branch-check
+    match:
+      operation: "push"
+      when: "params.branch.startsWith(agent_prefix)"
+    action: deny
+    message: "Agent branches not allowed."

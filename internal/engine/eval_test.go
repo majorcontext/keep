@@ -14,7 +14,7 @@ func makeEvaluator(t *testing.T, rules []config.Rule) *Evaluator {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev, err := NewEvaluator(env, "test-scope", config.ModeEnforce, config.ErrorModeClosed, rules, nil)
+	ev, err := NewEvaluator(env, "test-scope", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -376,5 +376,101 @@ func TestEval_SpecificityGlobBeforeCatchAll(t *testing.T) {
 	}
 	if result.Rule != "glob-deny" {
 		t.Errorf("expected glob-deny to fire before catch-all, got %s", result.Rule)
+	}
+}
+
+func makeEvaluatorWithDefs(t *testing.T, rules []config.Rule, defs map[string]string) *Evaluator {
+	t.Helper()
+	env, err := keepcel.NewEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	ev, err := NewEvaluator(env, "test-scope", config.ModeEnforce, config.ErrorModeClosed, rules, nil, defs)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return ev
+}
+
+func TestEval_WithDefs(t *testing.T) {
+	defs := map[string]string{
+		"max_items": "5",
+	}
+	rules := []config.Rule{
+		{
+			Name:    "too-many-items",
+			Action:  config.ActionDeny,
+			Match:   config.Match{When: "size(params.items) > max_items"},
+			Message: "too many items",
+		},
+	}
+	ev := makeEvaluatorWithDefs(t, rules, defs)
+
+	// 6 items > 5 => deny
+	result := ev.Evaluate(makeCall("create", map[string]any{
+		"items": []any{"a", "b", "c", "d", "e", "f"},
+	}))
+	if result.Decision != Deny {
+		t.Errorf("expected Deny for 6 items, got %s", result.Decision)
+	}
+
+	// 3 items <= 5 => allow
+	result = ev.Evaluate(makeCall("create", map[string]any{
+		"items": []any{"a", "b", "c"},
+	}))
+	if result.Decision != Allow {
+		t.Errorf("expected Allow for 3 items, got %s", result.Decision)
+	}
+}
+
+func TestEval_DefsListLiteral(t *testing.T) {
+	defs := map[string]string{
+		"allowed_teams": "['TEAM-ENG', 'TEAM-INFRA']",
+	}
+	rules := []config.Rule{
+		{
+			Name:    "team-check",
+			Action:  config.ActionDeny,
+			Match:   config.Match{When: "!(params.team in allowed_teams)"},
+			Message: "team not allowed",
+		},
+	}
+	ev := makeEvaluatorWithDefs(t, rules, defs)
+
+	// Allowed team => allow
+	result := ev.Evaluate(makeCall("create", map[string]any{"team": "TEAM-ENG"}))
+	if result.Decision != Allow {
+		t.Errorf("expected Allow for TEAM-ENG, got %s", result.Decision)
+	}
+
+	// Disallowed team => deny
+	result = ev.Evaluate(makeCall("create", map[string]any{"team": "TEAM-SALES"}))
+	if result.Decision != Deny {
+		t.Errorf("expected Deny for TEAM-SALES, got %s", result.Decision)
+	}
+}
+
+func TestEval_DefsStringLiteral(t *testing.T) {
+	defs := map[string]string{
+		"agent_prefix": "'agent/'",
+	}
+	rules := []config.Rule{
+		{
+			Name:    "agent-branch",
+			Action:  config.ActionDeny,
+			Match:   config.Match{When: "params.branch.startsWith(agent_prefix)"},
+			Message: "agent branches not allowed",
+		},
+	}
+	ev := makeEvaluatorWithDefs(t, rules, defs)
+
+	result := ev.Evaluate(makeCall("push", map[string]any{"branch": "agent/fix-123"}))
+	if result.Decision != Deny {
+		t.Errorf("expected Deny for agent/ branch, got %s", result.Decision)
+	}
+
+	result = ev.Evaluate(makeCall("push", map[string]any{"branch": "main"}))
+	if result.Decision != Allow {
+		t.Errorf("expected Allow for main branch, got %s", result.Decision)
 	}
 }
