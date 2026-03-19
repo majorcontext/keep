@@ -285,11 +285,16 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 
 		case config.ActionRedact:
 			if cr.rule.Redact != nil && !auditOnly {
-				m := redact.Apply(call.Params, cr.rule.Redact.Target, cr.patterns)
-				if len(m) > 0 && firstRedactRule == "" {
-					firstRedactRule = cr.rule.Name
+				m := redact.Apply(celParams, cr.rule.Redact.Target, cr.patterns)
+				if len(m) > 0 {
+					if firstRedactRule == "" {
+						firstRedactRule = cr.rule.Name
+					}
+					// Apply mutations to the working params so subsequent
+					// redact rules see the already-redacted values.
+					celParams = redact.ApplyMutations(celParams, m)
+					mutations = append(mutations, m...)
 				}
-				mutations = append(mutations, m...)
 			}
 		}
 	}
