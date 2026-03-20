@@ -347,6 +347,8 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// 3. Buffer all SSE events from upstream.
+	// Stop on message_stop (the terminal Anthropic event) rather than waiting
+	// for EOF — the upstream may keep the connection open after the last event.
 	reader := sse.NewReader(io.LimitReader(upstreamResp.Body, maxResponseBodySize))
 	var events []sse.Event
 	for {
@@ -359,6 +361,9 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 		events = append(events, ev)
+		if ev.Type == "message_stop" {
+			break
+		}
 	}
 
 	// 4. Reassemble into MessagesResponse.
