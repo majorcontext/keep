@@ -1,0 +1,43 @@
+scope: demo-gateway
+mode: enforce
+
+defs:
+  destructive_patterns: "['rm -rf', 'DROP TABLE', 'TRUNCATE', 'mkfs']"
+
+rules:
+  # Redact secrets from tool results before they reach the model
+  - name: redact-aws-keys
+    match:
+      operation: "llm.tool_result"
+    action: redact
+    redact:
+      target: "params.content"
+      patterns:
+        - match: "AKIA[0-9A-Z]{16}"
+          replace: "[REDACTED:AWS_KEY]"
+        - match: "(?i)(password|secret|api_key|token)\\s*[=:]\\s*\\S+"
+          replace: "[REDACTED:SECRET]"
+
+  # Block destructive bash commands from the model
+  - name: block-destructive-bash
+    match:
+      operation: "llm.tool_use"
+      when: >
+        params.name == 'bash'
+        && containsAny(lower(params.input.command), destructive_patterns)
+    action: deny
+    message: "Destructive command blocked by policy."
+
+  # Block networking tools
+  - name: block-networking
+    match:
+      operation: "llm.tool_use"
+      when: "params.name in ['curl', 'wget', 'nc', 'ssh']"
+    action: deny
+    message: "Networking tools are blocked by policy."
+
+  # Log everything
+  - name: audit-all
+    match:
+      operation: "llm.*"
+    action: log

@@ -1,0 +1,10 @@
+# Gateway config for the demo.
+# The demo script substitutes RULES_DIR and LOG_OUTPUT at runtime.
+listen: ":18080"
+rules_dir: "RULES_DIR"
+provider: anthropic
+upstream: "https://api.anthropic.com"
+scope: demo-gateway
+log:
+  format: json
+  output: "LOG_OUTPUT"
