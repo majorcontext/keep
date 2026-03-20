@@ -22,3 +22,13 @@ rules:
       when: "params.token_estimate > 100000"
     action: deny
     message: "Context too large."
+  - name: redact-response-text-secrets
+    match:
+      operation: "llm.text"
+      when: "params.text.contains('SECRET_')"
+    action: redact
+    redact:
+      target: "params.text"
+      patterns:
+        - match: "SECRET_[A-Z_]+"
+          replace: "[REDACTED]"

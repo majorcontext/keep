@@ -15,6 +15,7 @@ import (
 	"github.com/majorcontext/keep/internal/audit"
 	"github.com/majorcontext/keep/internal/gateway/anthropic"
 	gwconfig "github.com/majorcontext/keep/internal/gateway/config"
+	"github.com/majorcontext/keep/internal/sse"
 )
 
 // maxRequestBodySize is the maximum size of a request body we will read (4 MB).
@@ -118,20 +119,6 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 2b. Reject streaming requests — the policy gateway cannot evaluate streamed responses.
-	if req.Stream {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(map[string]any{
-			"type": "error",
-			"error": map[string]any{
-				"type":    "unsupported",
-				"message": "Streaming is not supported by the policy gateway. Set stream: false.",
-			},
-		})
-		return
-	}
-
 	// 3. Decompose request into calls.
 	calls := anthropic.DecomposeRequest(&req, p.scope, p.decompose)
 
@@ -192,7 +179,13 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 7. Forward to upstream.
+	// 7. Streaming: buffer, evaluate, replay/synthesize.
+	if req.Stream {
+		p.handleStreamingResponse(w, r, forwardBody)
+		return
+	}
+
+	// 8. Forward to upstream.
 	upstreamBase := strings.TrimRight(p.upstream.String(), "/")
 	upstreamURL := upstreamBase + "/v1/messages"
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", upstreamURL, bytes.NewReader(forwardBody))
@@ -316,6 +309,128 @@ func buildRequestBlockMap(req *anthropic.MessagesRequest, cfg gwconfig.Decompose
 		}
 	}
 	return positions
+}
+
+// handleStreamingResponse handles the upstream call and response for streaming requests.
+// It buffers the full SSE stream, reassembles into a MessagesResponse, evaluates policy,
+// then replays original events (if clean) or synthesizes new events (if redacted).
+func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, forwardBody []byte) {
+	// 1. Forward to upstream.
+	upstreamBase := strings.TrimRight(p.upstream.String(), "/")
+	upstreamURL := upstreamBase + "/v1/messages"
+	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", upstreamURL, bytes.NewReader(forwardBody))
+	if err != nil {
+		writeInternalError(w, "failed to create upstream request")
+		return
+	}
+
+	for _, h := range []string{"Authorization", "Content-Type", "anthropic-version", "x-api-key"} {
+		if v := r.Header.Get(h); v != "" {
+			upstreamReq.Header.Set(h, v)
+		}
+	}
+
+	upstreamResp, err := p.client.Do(upstreamReq)
+	if err != nil {
+		writeInternalError(w, "upstream request failed")
+		return
+	}
+	defer upstreamResp.Body.Close()
+
+	// 2. If upstream returned non-2xx, pass through as-is.
+	if upstreamResp.StatusCode < 200 || upstreamResp.StatusCode >= 300 {
+		respBody, _ := io.ReadAll(io.LimitReader(upstreamResp.Body, maxResponseBodySize))
+		copyResponseHeaders(w, upstreamResp)
+		w.WriteHeader(upstreamResp.StatusCode)
+		_, _ = w.Write(respBody)
+		return
+	}
+
+	// 3. Buffer all SSE events from upstream.
+	reader := sse.NewReader(io.LimitReader(upstreamResp.Body, maxResponseBodySize))
+	var events []sse.Event
+	for {
+		ev, err := reader.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			writeInternalError(w, "failed to read upstream SSE stream")
+			return
+		}
+		events = append(events, ev)
+	}
+
+	// 4. Reassemble into MessagesResponse.
+	resp, err := anthropic.ReassembleFromEvents(events)
+	if err != nil {
+		writeInternalError(w, "failed to reassemble streaming response")
+		return
+	}
+
+	// 5. Decompose and evaluate response policy.
+	respCalls := anthropic.DecomposeResponse(resp, p.scope, p.decompose)
+
+	respSummaryOffset := 0
+	if p.decompose.ResponseSummaryEnabled() && len(respCalls) > 0 {
+		respSummaryOffset = 1
+	}
+
+	var respBlockResults []anthropic.BlockResult
+	respHasRedaction := false
+
+	for i, call := range respCalls {
+		result, evalErr := p.engine.Evaluate(call, p.scope)
+		if evalErr != nil {
+			writeInternalError(w, "response policy evaluation error")
+			return
+		}
+
+		if p.logger != nil {
+			p.logger.Log(result.Audit)
+		}
+
+		if result.Decision == keep.Deny {
+			writePolicyDeny(w, result.Rule, result.Message)
+			return
+		}
+
+		if i >= respSummaryOffset {
+			if result.Decision == keep.Redact {
+				respHasRedaction = true
+			}
+			respBlockResults = append(respBlockResults, anthropic.BlockResult{
+				BlockIndex: i - respSummaryOffset,
+				Result:     result,
+			})
+		}
+	}
+
+	// 6. Determine which events to send.
+	var outEvents []sse.Event
+	if respHasRedaction {
+		patched := anthropic.ReassembleResponse(resp, respBlockResults)
+		outEvents = anthropic.SynthesizeEvents(patched)
+	} else {
+		outEvents = events
+	}
+
+	// 7. Stream events to client.
+	sseWriter, err := sse.NewWriter(w)
+	if err != nil {
+		writeInternalError(w, "streaming not supported by response writer")
+		return
+	}
+	// Copy rate-limit headers from upstream, then set SSE headers (overrides Content-Type).
+	copyResponseHeaders(w, upstreamResp)
+	sseWriter.SetHeaders()
+	w.WriteHeader(http.StatusOK)
+
+	for _, ev := range outEvents {
+		if err := sseWriter.WriteEvent(ev); err != nil {
+			return
+		}
+	}
 }
 
 // copyResponseHeaders copies relevant headers from an upstream response to the client.

@@ -13,6 +13,7 @@ import (
 	"github.com/majorcontext/keep/internal/audit"
 	"github.com/majorcontext/keep/internal/gateway/anthropic"
 	gwconfig "github.com/majorcontext/keep/internal/gateway/config"
+	"github.com/majorcontext/keep/internal/sse"
 )
 
 // newTestEngine loads the test-gateway rules and returns a ready engine.
@@ -30,12 +31,16 @@ func newTestEngine(t *testing.T) *keep.Engine {
 func newTestProxy(t *testing.T, upstreamURL string, logger *audit.Logger) *Proxy {
 	t.Helper()
 	eng := newTestEngine(t)
+	textEnabled := true
 	cfg := &gwconfig.GatewayConfig{
 		Listen:   ":0",
 		RulesDir: "testdata/rules",
 		Provider: "anthropic",
 		Upstream: upstreamURL,
 		Scope:    "test-gateway",
+		Decompose: gwconfig.DecomposeConfig{
+			Text: &textEnabled,
+		},
 	}
 	p, err := NewProxy(eng, cfg, logger)
 	if err != nil {
@@ -90,6 +95,54 @@ func destructiveUpstream() *httptest.Server {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(resp)
+	}))
+}
+
+// sseUpstream returns a test server that responds with SSE events for a simple text response.
+func sseUpstream() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("X-Request-Id", "req_stream_123")
+		w.WriteHeader(http.StatusOK)
+
+		events := []string{
+			"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_stream\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n",
+			"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+			"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"Hello from \"}}\n\n",
+			"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"upstream\"}}\n\n",
+			"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+			"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":5}}\n\n",
+			"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+		}
+		for _, ev := range events {
+			_, _ = w.Write([]byte(ev))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	}))
+}
+
+// destructiveSSEUpstream returns a test server that streams a destructive tool_use via SSE.
+func destructiveSSEUpstream() *httptest.Server {
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		events := []string{
+			"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_deny\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n",
+			"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"tool_use\",\"id\":\"toolu_01\",\"name\":\"bash\",\"input\":{}}}\n\n",
+			"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"input_json_delta\",\"partial_json\":\"{\\\"command\\\": \\\"rm -rf /\\\"}\"}}\n\n",
+			"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+			"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"tool_use\"},\"usage\":{\"output_tokens\":15}}\n\n",
+			"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+		}
+		for _, ev := range events {
+			_, _ = w.Write([]byte(ev))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
 	}))
 }
 
@@ -337,8 +390,8 @@ func TestProxy_PassthroughNonMessages(t *testing.T) {
 	}
 }
 
-func TestProxy_StreamingRejected(t *testing.T) {
-	upstream := echoUpstream()
+func TestProxy_StreamingAllowed(t *testing.T) {
+	upstream := sseUpstream()
 	defer upstream.Close()
 
 	p := newTestProxy(t, upstream.URL, nil)
@@ -361,14 +414,149 @@ func TestProxy_StreamingRejected(t *testing.T) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want %q", ct, "text/event-stream")
+	}
+
+	reader := sse.NewReader(resp.Body)
+	var events []sse.Event
+	for {
+		ev, err := reader.Next()
+		if err != nil {
+			break
+		}
+		events = append(events, ev)
+	}
+
+	// sseUpstream sends 7 events. Verify we get all 7 (original replay, not synthesis).
+	if len(events) != 7 {
+		t.Fatalf("expected 7 SSE events (original replay), got %d", len(events))
+	}
+
+	assembled, err := anthropic.ReassembleFromEvents(events)
+	if err != nil {
+		t.Fatalf("ReassembleFromEvents: %v", err)
+	}
+	if assembled.Content[0].Text != "Hello from upstream" {
+		t.Errorf("Text = %q, want %q", assembled.Content[0].Text, "Hello from upstream")
+	}
+}
+
+func TestProxy_StreamingDenyResponse(t *testing.T) {
+	upstream := destructiveSSEUpstream()
+	defer upstream.Close()
+
+	p := newTestProxy(t, upstream.URL, nil)
+	gw := httptest.NewServer(p)
+	defer gw.Close()
+
+	reqBody := anthropic.MessagesRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 1024,
+		Stream:    true,
+		Messages: []anthropic.Message{
+			{Role: "user", Content: "Do something"},
+		},
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	resp, err := http.Post(gw.URL+"/v1/messages", "application/json", bytes.NewReader(bodyBytes))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
 	if resp.StatusCode != http.StatusBadRequest {
 		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected 400, got %d: %s", resp.StatusCode, body)
 	}
 
-	body, _ := io.ReadAll(resp.Body)
-	if !strings.Contains(string(body), "Streaming") {
-		t.Errorf("expected 'Streaming' in error message, got: %s", body)
+	var errResp policyError
+	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+		t.Fatalf("decode error: %v", err)
+	}
+	if errResp.Error.Type != "policy_denied" {
+		t.Errorf("expected policy_denied, got %s", errResp.Error.Type)
+	}
+	if !strings.Contains(errResp.Error.Message, "block-destructive") {
+		t.Errorf("expected block-destructive in message, got %q", errResp.Error.Message)
+	}
+}
+
+func TestProxy_StreamingRedactResponse(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+
+		events := []string{
+			"event: message_start\ndata: {\"type\":\"message_start\",\"message\":{\"id\":\"msg_redact\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-sonnet-4-20250514\",\"stop_reason\":null,\"usage\":{\"input_tokens\":10,\"output_tokens\":0}}}\n\n",
+			"event: content_block_start\ndata: {\"type\":\"content_block_start\",\"index\":0,\"content_block\":{\"type\":\"text\",\"text\":\"\"}}\n\n",
+			"event: content_block_delta\ndata: {\"type\":\"content_block_delta\",\"index\":0,\"delta\":{\"type\":\"text_delta\",\"text\":\"The key is SECRET_API_KEY_VALUE\"}}\n\n",
+			"event: content_block_stop\ndata: {\"type\":\"content_block_stop\",\"index\":0}\n\n",
+			"event: message_delta\ndata: {\"type\":\"message_delta\",\"delta\":{\"stop_reason\":\"end_turn\"},\"usage\":{\"output_tokens\":10}}\n\n",
+			"event: message_stop\ndata: {\"type\":\"message_stop\"}\n\n",
+		}
+		for _, ev := range events {
+			_, _ = w.Write([]byte(ev))
+			if f, ok := w.(http.Flusher); ok {
+				f.Flush()
+			}
+		}
+	}))
+	defer upstream.Close()
+
+	p := newTestProxy(t, upstream.URL, nil)
+	gw := httptest.NewServer(p)
+	defer gw.Close()
+
+	reqBody := anthropic.MessagesRequest{
+		Model:     "claude-sonnet-4-20250514",
+		MaxTokens: 1024,
+		Stream:    true,
+		Messages: []anthropic.Message{
+			{Role: "user", Content: "Show me the key"},
+		},
+	}
+	bodyBytes, _ := json.Marshal(reqBody)
+
+	resp, err := http.Post(gw.URL+"/v1/messages", "application/json", bytes.NewReader(bodyBytes))
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, body)
+	}
+
+	reader := sse.NewReader(resp.Body)
+	var events []sse.Event
+	for {
+		ev, err := reader.Next()
+		if err != nil {
+			break
+		}
+		events = append(events, ev)
+	}
+
+	assembled, err := anthropic.ReassembleFromEvents(events)
+	if err != nil {
+		t.Fatalf("ReassembleFromEvents: %v", err)
+	}
+
+	text := assembled.Content[0].Text
+	if strings.Contains(text, "SECRET_API_KEY_VALUE") {
+		t.Errorf("secret was not redacted: %s", text)
+	}
+	if !strings.Contains(text, "[REDACTED]") {
+		t.Errorf("expected [REDACTED] in text, got: %s", text)
 	}
 }
 
