@@ -133,9 +133,37 @@ else
 fi
 echo ""
 
-# ── Test 2: claude -p through gateway ─────────────────────────────
+# ── Test 2: curl — streaming request through gateway ─────────────
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Test 2: claude -p through the gateway"
+echo "Test 2: Streaming API call through the gateway (curl, stream:true)"
+echo ""
+
+RESPONSE=$(curl -s -w "\n%{http_code}" \
+  "http://localhost:${GW_PORT}/v1/messages" \
+  -H "Content-Type: application/json" \
+  -H "anthropic-version: 2023-06-01" \
+  -d '{
+    "model": "claude-haiku-4-5-20251001",
+    "max_tokens": 30,
+    "stream": true,
+    "messages": [{"role": "user", "content": "What is 2+2? Answer in one word."}]
+  }' 2>&1)
+
+HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+if [ "$HTTP_CODE" = "200" ]; then
+  EVENT_COUNT=$(echo "$BODY" | grep -c "^event:" || true)
+  echo "  ✓ HTTP 200 — Received $EVENT_COUNT SSE events"
+  echo "  The gateway buffered the stream, evaluated policy, and replayed events."
+else
+  echo "  ✗ HTTP $HTTP_CODE — $BODY"
+fi
+echo ""
+
+# ── Test 3: claude -p through gateway (streaming) ────────────────
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Test 3: claude -p through the gateway (streaming)"
 echo ""
 echo "Running: ANTHROPIC_BASE_URL=http://localhost:${GW_PORT} claude -p 'What is 2+2? One word.'"
 echo ""
@@ -146,20 +174,16 @@ CLAUDE_OUTPUT=$(ANTHROPIC_BASE_URL="http://localhost:${GW_PORT}" \
   --max-turns 1 \
   2>&1) || true
 
-if echo "$CLAUDE_OUTPUT" | grep -qi "streaming"; then
-  echo "  ~ claude -p uses streaming by default, which the gateway correctly rejects."
-  echo "    This is expected — streaming support requires SSE parsing (future work)."
-  echo "    Use curl with stream:false for non-streaming requests (see tests above)."
-elif [ -n "$CLAUDE_OUTPUT" ]; then
-  echo "  ✓ Claude response: $CLAUDE_OUTPUT"
+if [ -n "$CLAUDE_OUTPUT" ]; then
+  echo "  ✓ Claude response (streamed through gateway): $CLAUDE_OUTPUT"
 else
   echo "  ✗ claude -p produced no output (auth may not be available)"
 fi
 echo ""
 
-# ── Test 3: Destructive command blocked ───────────────────────────
+# ── Test 4: Destructive command blocked ───────────────────────────
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Test 3: Blocking a destructive bash command"
+echo "Test 4: Blocking a destructive bash command"
 echo ""
 echo "Simulating a model response that contains 'rm -rf'."
 echo "We craft the API exchange so no real model generates a dangerous command."
@@ -215,9 +239,9 @@ else
 fi
 echo ""
 
-# ── Test 4: Secret redaction ──────────────────────────────────────
+# ── Test 5: Secret redaction ──────────────────────────────────────
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Test 4: Secret redaction in tool results"
+echo "Test 5: Secret redaction in tool results"
 echo ""
 echo "Sending a conversation where a tool_result contains an AWS key..."
 echo ""
