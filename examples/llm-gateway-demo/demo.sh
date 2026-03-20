@@ -2,8 +2,9 @@
 #
 # Keep LLM Gateway Demo
 #
-# Runs the keep-llm-gateway in front of the real Anthropic API and
-# demonstrates policy enforcement with both curl and claude -p.
+# Runs the keep-llm-gateway in front of the Anthropic API and demonstrates
+# policy enforcement. Uses `claude -p` for real API calls (picks up your
+# local credentials) and a mock upstream for deny/redact tests.
 #
 # Usage:
 #   ./examples/llm-gateway-demo/demo.sh
@@ -13,10 +14,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEMO_DIR=$(mktemp -d)
 GW_PORT=18080
+MOCK_PORT=18081
+GW_MOCK_PORT=18082
 GW_PID=""
+GW_MOCK_PID=""
+MOCK_PID=""
 
 cleanup() {
-  [ -n "$GW_PID" ] && kill "$GW_PID" 2>/dev/null
+  for pid in "$GW_PID" "$GW_MOCK_PID" "$MOCK_PID"; do
+    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+  done
   rm -rf "$DEMO_DIR"
 }
 trap cleanup EXIT
@@ -24,13 +31,14 @@ trap cleanup EXIT
 echo "=== Keep LLM Gateway Demo ==="
 echo ""
 
-# ── Step 1: Build ──────────────────────────────────────────────────
+# ── Build ─────────────────────────────────────────────────────────
 echo "Building gateway..."
 go build -o "$DEMO_DIR/keep-llm-gateway" ./cmd/keep-llm-gateway
+go build -o "$DEMO_DIR/mock-anthropic" "$SCRIPT_DIR/mock-upstream"
 echo "  done"
 echo ""
 
-# ── Step 2: Create rules ──────────────────────────────────────────
+# ── Create rules ──────────────────────────────────────────────────
 mkdir -p "$DEMO_DIR/rules"
 cat > "$DEMO_DIR/rules/gateway.yaml" << 'YAML'
 scope: demo-gateway
@@ -78,7 +86,7 @@ rules:
     action: log
 YAML
 
-# ── Step 3: Create gateway config ─────────────────────────────────
+# ── Start real gateway (upstream: api.anthropic.com) ──────────────
 cat > "$DEMO_DIR/gateway.yaml" << YAML
 listen: ":${GW_PORT}"
 rules_dir: "$DEMO_DIR/rules"
@@ -90,82 +98,41 @@ log:
   output: "$DEMO_DIR/audit.jsonl"
 YAML
 
-# ── Step 4: Start gateway ─────────────────────────────────────────
-echo "Starting keep-llm-gateway on :${GW_PORT}..."
+echo "Starting gateway on :${GW_PORT} → api.anthropic.com..."
 "$DEMO_DIR/keep-llm-gateway" --config "$DEMO_DIR/gateway.yaml" 2>&1 &
 GW_PID=$!
 sleep 1
-
-# Quick health check — passthrough a non-messages request
-if ! curl -s -o /dev/null -w '' "http://localhost:${GW_PORT}/v1/health" 2>/dev/null; then
-  true  # gateway doesn't need a health endpoint — just check it's up
-fi
 echo "  Gateway running (PID $GW_PID)"
 echo ""
 
-# ── Test 1: curl — normal request through gateway ─────────────────
+# ── Start mock gateway (upstream: mock server) ────────────────────
+"$DEMO_DIR/mock-anthropic" &
+MOCK_PID=$!
+sleep 0.5
+
+cat > "$DEMO_DIR/gateway-mock.yaml" << YAML
+listen: ":${GW_MOCK_PORT}"
+rules_dir: "$DEMO_DIR/rules"
+provider: anthropic
+upstream: "http://localhost:${MOCK_PORT}"
+scope: demo-gateway
+log:
+  format: json
+  output: "$DEMO_DIR/audit.jsonl"
+YAML
+
+echo "Starting gateway on :${GW_MOCK_PORT} → mock upstream..."
+"$DEMO_DIR/keep-llm-gateway" --config "$DEMO_DIR/gateway-mock.yaml" 2>&1 &
+GW_MOCK_PID=$!
+sleep 0.5
+echo "  Mock gateway running (PID $GW_MOCK_PID)"
+echo ""
+
+# ── Test 1: claude -p through gateway ─────────────────────────────
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Test 1: Normal API call through the gateway (curl)"
+echo "Test 1: claude -p through the gateway (streaming)"
 echo ""
-
-RESPONSE=$(curl -s -w "\n%{http_code}" \
-  "http://localhost:${GW_PORT}/v1/messages" \
-  -H "Content-Type: application/json" \
-  -H "anthropic-version: 2023-06-01" \
-  -d '{
-    "model": "claude-haiku-4-5-20251001",
-    "max_tokens": 50,
-    "messages": [{"role": "user", "content": "What is 2+2? Answer in one word."}]
-  }' 2>&1)
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-BODY=$(echo "$RESPONSE" | sed '$d')
-
-if [ "$HTTP_CODE" = "200" ]; then
-  ANSWER=$(echo "$BODY" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r['content'][0]['text'])" 2>/dev/null || echo "$BODY")
-  echo "  ✓ HTTP 200 — Model said: $ANSWER"
-else
-  echo "  ✗ HTTP $HTTP_CODE — $BODY"
-  echo ""
-  echo "  The gateway could not reach the Anthropic API."
-  echo "  Make sure HTTPS_PROXY is set or ANTHROPIC_API_KEY is available."
-  exit 1
-fi
-echo ""
-
-# ── Test 2: curl — streaming request through gateway ─────────────
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Test 2: Streaming API call through the gateway (curl, stream:true)"
-echo ""
-
-RESPONSE=$(curl -s -w "\n%{http_code}" \
-  "http://localhost:${GW_PORT}/v1/messages" \
-  -H "Content-Type: application/json" \
-  -H "anthropic-version: 2023-06-01" \
-  -d '{
-    "model": "claude-haiku-4-5-20251001",
-    "max_tokens": 30,
-    "stream": true,
-    "messages": [{"role": "user", "content": "What is 2+2? Answer in one word."}]
-  }' 2>&1)
-
-HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-BODY=$(echo "$RESPONSE" | sed '$d')
-
-if [ "$HTTP_CODE" = "200" ]; then
-  EVENT_COUNT=$(echo "$BODY" | grep -c "^event:" || true)
-  echo "  ✓ HTTP 200 — Received $EVENT_COUNT SSE events"
-  echo "  The gateway buffered the stream, evaluated policy, and replayed events."
-else
-  echo "  ✗ HTTP $HTTP_CODE — $BODY"
-fi
-echo ""
-
-# ── Test 3: claude -p through gateway (streaming) ────────────────
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Test 3: claude -p through the gateway (streaming)"
-echo ""
-echo "Running: ANTHROPIC_BASE_URL=http://localhost:${GW_PORT} claude -p 'What is 2+2? One word.'"
+echo "  ANTHROPIC_BASE_URL=http://localhost:${GW_PORT} claude -p 'What is 2+2?'"
 echo ""
 
 CLAUDE_OUTPUT=$(ANTHROPIC_BASE_URL="http://localhost:${GW_PORT}" \
@@ -175,46 +142,23 @@ CLAUDE_OUTPUT=$(ANTHROPIC_BASE_URL="http://localhost:${GW_PORT}" \
   2>&1) || true
 
 if [ -n "$CLAUDE_OUTPUT" ]; then
-  echo "  ✓ Claude response (streamed through gateway): $CLAUDE_OUTPUT"
+  echo "  ✓ Claude response: $CLAUDE_OUTPUT"
 else
-  echo "  ✗ claude -p produced no output (auth may not be available)"
+  echo "  ✗ claude -p produced no output"
+  echo "    Make sure claude is installed and has valid credentials."
 fi
 echo ""
 
-# ── Test 4: Destructive command blocked ───────────────────────────
+# ── Test 2: Destructive command blocked ───────────────────────────
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Test 4: Blocking a destructive bash command"
+echo "Test 2: Blocking a destructive bash command"
 echo ""
-echo "Simulating a model response that contains 'rm -rf'."
-echo "We craft the API exchange so no real model generates a dangerous command."
+echo "  The mock upstream returns a response with 'rm -rf /data/old-backups'."
+echo "  The gateway evaluates the response and blocks it."
 echo ""
-
-# We send a request as if we're continuing a conversation where the model
-# already responded with a tool_use. The gateway evaluates the upstream
-# response and blocks it. To avoid actually asking a model to generate
-# rm -rf, we start a mock upstream just for this test.
-go build -o "$DEMO_DIR/mock-anthropic" "$SCRIPT_DIR/mock-upstream"
-"$DEMO_DIR/mock-anthropic" &
-MOCK_PID=$!
-sleep 0.5
-
-# Temporarily point a second gateway at the mock for this test
-cat > "$DEMO_DIR/gateway-mock.yaml" << YAML
-listen: ":18082"
-rules_dir: "$DEMO_DIR/rules"
-provider: anthropic
-upstream: "http://localhost:18081"
-scope: demo-gateway
-log:
-  format: json
-  output: "$DEMO_DIR/audit.jsonl"
-YAML
-"$DEMO_DIR/keep-llm-gateway" --config "$DEMO_DIR/gateway-mock.yaml" 2>&1 &
-GW_MOCK_PID=$!
-sleep 0.5
 
 RESPONSE=$(curl -s -w "\n%{http_code}" \
-  "http://localhost:18082/v1/messages" \
+  "http://localhost:${GW_MOCK_PORT}/v1/messages" \
   -H "Content-Type: application/json" \
   -H "anthropic-version: 2023-06-01" \
   -d '{
@@ -223,31 +167,28 @@ RESPONSE=$(curl -s -w "\n%{http_code}" \
     "messages": [{"role": "user", "content": "Delete the old backups please"}]
   }' 2>&1)
 
-kill "$GW_MOCK_PID" "$MOCK_PID" 2>/dev/null || true
-
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
 BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" = "400" ]; then
   ERROR_MSG=$(echo "$BODY" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r['error']['message'])" 2>/dev/null || echo "$BODY")
   echo "  ✓ HTTP 400 — BLOCKED: $ERROR_MSG"
-  echo ""
-  echo "  The mock upstream returned a response with 'rm -rf /data/old-backups'."
-  echo "  The gateway intercepted it and blocked it before it reached the agent."
 else
   echo "  ? HTTP $HTTP_CODE — $BODY"
 fi
 echo ""
 
-# ── Test 5: Secret redaction ──────────────────────────────────────
+# ── Test 3: Secret redaction ──────────────────────────────────────
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Test 5: Secret redaction in tool results"
+echo "Test 3: Secret redaction in tool results"
 echo ""
-echo "Sending a conversation where a tool_result contains an AWS key..."
+echo "  Sending a tool_result with an AWS key and password through the"
+echo "  gateway. The mock upstream records what it received so we can"
+echo "  verify secrets were redacted before leaving the gateway."
 echo ""
 
 RESPONSE=$(curl -s -w "\n%{http_code}" \
-  "http://localhost:${GW_PORT}/v1/messages" \
+  "http://localhost:${GW_MOCK_PORT}/v1/messages" \
   -H "Content-Type: application/json" \
   -H "anthropic-version: 2023-06-01" \
   -d '{
@@ -265,14 +206,30 @@ RESPONSE=$(curl -s -w "\n%{http_code}" \
   }' 2>&1)
 
 HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-BODY=$(echo "$RESPONSE" | sed '$d')
 
 if [ "$HTTP_CODE" = "200" ]; then
-  echo "  ✓ HTTP 200 — Model responded (secrets were redacted before reaching it)"
-  ANSWER=$(echo "$BODY" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r['content'][0]['text'][:200])" 2>/dev/null || echo "(parse error)")
-  echo "  Model said: $ANSWER"
+  # Check what the mock upstream actually received
+  FORWARDED=$(curl -s "http://localhost:${MOCK_PORT}/debug/last-request" 2>&1)
+  if echo "$FORWARDED" | grep -q "REDACTED"; then
+    echo "  ✓ HTTP 200 — Secrets were redacted before reaching upstream"
+    echo ""
+    echo "  What the upstream saw:"
+    echo "$FORWARDED" | python3 -c "
+import json, sys
+req = json.load(sys.stdin)
+for msg in req.get('messages', []):
+    content = msg.get('content', '')
+    if isinstance(content, list):
+        for block in content:
+            if block.get('type') == 'tool_result':
+                print('    ' + block.get('content', ''))
+" 2>/dev/null
+  else
+    echo "  ✗ Secrets were NOT redacted: $FORWARDED"
+  fi
 else
-  echo "  HTTP $HTTP_CODE — $BODY"
+  BODY=$(echo "$RESPONSE" | sed '$d')
+  echo "  ✗ HTTP $HTTP_CODE — $BODY"
 fi
 echo ""
 
