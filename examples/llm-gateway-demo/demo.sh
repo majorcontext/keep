@@ -55,19 +55,14 @@ echo ""
 echo "  \$ ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL claude -p 'What is 2+2?'"
 echo ""
 
-if timeout 30 claude -p "What is 2+2? Answer in exactly one word, no punctuation." \
+if claude -p "What is 2+2? Answer in exactly one word, no punctuation." \
     --model claude-haiku-4-5-20251001 \
     --max-turns 1 2>&1; then
   echo ""
   echo "  ✓ Streaming request succeeded"
 else
-  EXIT_CODE=$?
   echo ""
-  if [ "$EXIT_CODE" -eq 124 ]; then
-    echo "  ✗ Timed out after 30s"
-  else
-    echo "  ✗ claude exited with code $EXIT_CODE"
-  fi
+  echo "  ✗ claude exited with code $?"
 fi
 echo ""
 
