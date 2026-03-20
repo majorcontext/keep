@@ -3,10 +3,8 @@
 # Keep LLM Gateway Demo
 #
 # Runs the keep-llm-gateway in front of the Anthropic API and demonstrates
-# policy enforcement: streaming, redaction, and audit logging.
-#
-# Auth is handled by `claude -p`, which picks up credentials from wherever
-# you have them configured (OAuth, API key, etc.).
+# policy enforcement. Auth is handled by claude, which picks up credentials
+# from whatever source you have configured (OAuth, API key, etc.).
 #
 # Usage:
 #   ./examples/llm-gateway-demo/demo.sh
@@ -48,66 +46,20 @@ echo ""
 
 export ANTHROPIC_BASE_URL="http://localhost:${GW_PORT}"
 
-# ── Test 1: Streaming request via claude -p ───────────────────────
+# ── Test: Streaming + redaction ───────────────────────────────────
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Test 1: Streaming request through the gateway"
+echo "Streaming through the gateway with secret redaction"
 echo ""
-echo "  \$ ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL claude -p 'What is 2+2?'"
+echo "  The prompt contains a fake API key. The gateway redacts it"
+echo "  before it reaches the model, so Claude never sees the secret."
 echo ""
-
-if claude -p "What is 2+2? Answer in exactly one word, no punctuation." \
-    --model claude-haiku-4-5-20251001 \
-    --max-turns 1 2>&1; then
-  echo ""
-  echo "  ✓ Streaming request succeeded"
-else
-  echo ""
-  echo "  ✗ claude exited with code $?"
-fi
+echo "  \$ ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL claude -p '...'"
 echo ""
 
-# ── Test 2: Secret redaction ──────────────────────────────────────
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Test 2: Secret redaction in tool results"
-echo ""
-echo "  Sending a tool_result containing an AWS key and password."
-echo "  The gateway redacts secrets before forwarding to the model."
-echo ""
+claude -p "Use my API key: sk-ant-FAKE-1234567890abcdef to call the weather API for SF. What is the key I just gave you?" \
+  --model claude-haiku-4-5-20251001 \
+  --max-turns 1 2>&1 || true
 
-if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
-  RESPONSE=$(curl -s -w "\n%{http_code}" \
-    "$ANTHROPIC_BASE_URL/v1/messages" \
-    -H "Content-Type: application/json" \
-    -H "anthropic-version: 2023-06-01" \
-    -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -d '{
-      "model": "claude-haiku-4-5-20251001",
-      "max_tokens": 100,
-      "messages": [
-        {"role": "user", "content": "Read the .env file"},
-        {"role": "assistant", "content": [
-          {"type": "tool_use", "id": "tool_1", "name": "bash", "input": {"command": "cat .env"}}
-        ]},
-        {"role": "user", "content": [
-          {"type": "tool_result", "tool_use_id": "tool_1", "content": "DB_HOST=localhost\nAWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\npassword = hunter2\nAPP_NAME=myapp"}
-        ]}
-      ]
-    }' 2>&1)
-
-  HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-  BODY=$(echo "$RESPONSE" | sed '$d')
-
-  if [ "$HTTP_CODE" = "200" ]; then
-    echo "  ✓ HTTP 200 — Model responded (secrets were redacted before reaching it)"
-    ANSWER=$(echo "$BODY" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r['content'][0]['text'][:200])" 2>/dev/null || echo "(parse error)")
-    echo "  Model said: $ANSWER"
-  else
-    echo "  ✗ HTTP $HTTP_CODE — $BODY"
-  fi
-else
-  echo "  ~ Skipped: ANTHROPIC_API_KEY not set (needed for curl-based redaction test)"
-  echo "    Redaction is verified by unit tests: make test-unit ARGS='-run TestProxy_RedactRequest'"
-fi
 echo ""
 
 # ── Show audit log ────────────────────────────────────────────────

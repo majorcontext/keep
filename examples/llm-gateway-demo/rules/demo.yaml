@@ -5,8 +5,21 @@ defs:
   destructive_patterns: "['rm -rf', 'DROP TABLE', 'TRUNCATE', 'mkfs']"
 
 rules:
+  # Redact secrets from user text before they reach the model
+  - name: redact-secrets-in-text
+    match:
+      operation: "llm.text"
+    action: redact
+    redact:
+      target: "params.text"
+      patterns:
+        - match: "AKIA[0-9A-Z]{16}"
+          replace: "[REDACTED:AWS_KEY]"
+        - match: "(?i)(api[_ ]?key|password|secret|token)\\s*[:=]\\s*\\S+"
+          replace: "[REDACTED:SECRET]"
+
   # Redact secrets from tool results before they reach the model
-  - name: redact-aws-keys
+  - name: redact-secrets-in-tool-results
     match:
       operation: "llm.tool_result"
     action: redact
@@ -15,7 +28,7 @@ rules:
       patterns:
         - match: "AKIA[0-9A-Z]{16}"
           replace: "[REDACTED:AWS_KEY]"
-        - match: "(?i)(password|secret|api_key|token)\\s*[=:]\\s*\\S+"
+        - match: "(?i)(api[_ ]?key|password|secret|token)\\s*[:=]\\s*\\S+"
           replace: "[REDACTED:SECRET]"
 
   # Block destructive bash commands from the model
