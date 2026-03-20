@@ -125,3 +125,112 @@ func ReassembleFromEvents(events []sse.Event) (*MessagesResponse, error) {
 	resp.Content = blocks
 	return resp, nil
 }
+
+// SynthesizeEvents produces a minimal valid Anthropic SSE event sequence
+// from a MessagesResponse. Each content block gets one start + one delta + one stop.
+// This is used when the response was redacted and the original events can't be replayed.
+func SynthesizeEvents(resp *MessagesResponse) []sse.Event {
+	var events []sse.Event
+
+	// message_start: use a raw map so stop_reason serializes as null (not "").
+	startMsg := map[string]any{
+		"id":          resp.ID,
+		"type":        resp.Type,
+		"role":        resp.Role,
+		"model":       resp.Model,
+		"content":     []any{},
+		"stop_reason": nil,
+	}
+	if resp.Usage != nil {
+		startMsg["usage"] = map[string]any{
+			"input_tokens":  resp.Usage.InputTokens,
+			"output_tokens": 0,
+		}
+	}
+	startData, _ := json.Marshal(map[string]any{
+		"type":    "message_start",
+		"message": startMsg,
+	})
+	events = append(events, sse.Event{Type: "message_start", Data: string(startData)})
+
+	// Per content block: start + delta + stop.
+	for i, block := range resp.Content {
+		// content_block_start
+		var startBlock any
+		switch block.Type {
+		case "tool_use":
+			startBlock = map[string]any{
+				"type":  "tool_use",
+				"id":    block.ID,
+				"name":  block.Name,
+				"input": map[string]any{},
+			}
+		case "text":
+			startBlock = map[string]any{
+				"type": "text",
+				"text": "",
+			}
+		default:
+			startBlock = map[string]any{"type": block.Type}
+		}
+		blockStartData, _ := json.Marshal(map[string]any{
+			"type":          "content_block_start",
+			"index":         i,
+			"content_block": startBlock,
+		})
+		events = append(events, sse.Event{Type: "content_block_start", Data: string(blockStartData)})
+
+		// content_block_delta
+		var deltaData []byte
+		switch block.Type {
+		case "text":
+			deltaData, _ = json.Marshal(map[string]any{
+				"type":  "content_block_delta",
+				"index": i,
+				"delta": map[string]any{
+					"type": "text_delta",
+					"text": block.Text,
+				},
+			})
+		case "tool_use":
+			inputJSON, _ := json.Marshal(block.Input)
+			deltaData, _ = json.Marshal(map[string]any{
+				"type":  "content_block_delta",
+				"index": i,
+				"delta": map[string]any{
+					"type":         "input_json_delta",
+					"partial_json": string(inputJSON),
+				},
+			})
+		}
+		events = append(events, sse.Event{Type: "content_block_delta", Data: string(deltaData)})
+
+		// content_block_stop
+		stopData, _ := json.Marshal(map[string]any{
+			"type":  "content_block_stop",
+			"index": i,
+		})
+		events = append(events, sse.Event{Type: "content_block_stop", Data: string(stopData)})
+	}
+
+	// message_delta
+	msgDelta := map[string]any{
+		"type": "message_delta",
+		"delta": map[string]any{
+			"stop_reason": resp.StopReason,
+		},
+	}
+	if resp.Usage != nil {
+		msgDelta["usage"] = map[string]any{
+			"output_tokens": resp.Usage.OutputTokens,
+		}
+	}
+	msgDeltaData, _ := json.Marshal(msgDelta)
+	events = append(events, sse.Event{Type: "message_delta", Data: string(msgDeltaData)})
+
+	// message_stop
+	stopData, _ := json.Marshal(map[string]any{"type": "message_stop"})
+	events = append(events, sse.Event{Type: "message_stop", Data: string(stopData)})
+
+	return events
+}

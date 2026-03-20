@@ -204,3 +204,156 @@ func TestReassembleFromEvents_MalformedJSON(t *testing.T) {
 		t.Errorf("error = %q, want it to mention 'parse message_start'", err.Error())
 	}
 }
+
+func TestSynthesizeEvents_TextOnly(t *testing.T) {
+	resp := &MessagesResponse{
+		ID:         "msg_01",
+		Type:       "message",
+		Role:       "assistant",
+		Model:      "claude-sonnet-4-20250514",
+		StopReason: "end_turn",
+		Content: []ContentBlock{
+			{Type: "text", Text: "Hello world"},
+		},
+		Usage: &Usage{InputTokens: 25, OutputTokens: 10},
+	}
+
+	events := SynthesizeEvents(resp)
+
+	wantTypes := []string{
+		"message_start",
+		"content_block_start",
+		"content_block_delta",
+		"content_block_stop",
+		"message_delta",
+		"message_stop",
+	}
+	if len(events) != len(wantTypes) {
+		t.Fatalf("len(events) = %d, want %d", len(events), len(wantTypes))
+	}
+	for i, ev := range events {
+		if ev.Type != wantTypes[i] {
+			t.Errorf("events[%d].Type = %q, want %q", i, ev.Type, wantTypes[i])
+		}
+	}
+
+	if strings.Contains(events[0].Data, `"stop_reason":""`) {
+		t.Error("message_start should have null stop_reason, not empty string")
+	}
+}
+
+func TestSynthesizeEvents_ToolUse(t *testing.T) {
+	resp := &MessagesResponse{
+		ID:         "msg_02",
+		Type:       "message",
+		Role:       "assistant",
+		Model:      "claude-sonnet-4-20250514",
+		StopReason: "tool_use",
+		Content: []ContentBlock{
+			{Type: "tool_use", ID: "toolu_01", Name: "bash", Input: map[string]any{"command": "ls"}},
+		},
+		Usage: &Usage{InputTokens: 30, OutputTokens: 15},
+	}
+
+	events := SynthesizeEvents(resp)
+
+	if len(events) != 6 {
+		t.Fatalf("len(events) = %d, want 6", len(events))
+	}
+	if events[2].Type != "content_block_delta" {
+		t.Fatalf("events[2].Type = %q, want content_block_delta", events[2].Type)
+	}
+	if !strings.Contains(events[2].Data, `"partial_json"`) {
+		t.Errorf("expected input_json_delta in event data, got: %s", events[2].Data)
+	}
+}
+
+func TestSynthesizeEvents_MultiBlock(t *testing.T) {
+	resp := &MessagesResponse{
+		ID:         "msg_03",
+		Type:       "message",
+		Role:       "assistant",
+		Model:      "claude-sonnet-4-20250514",
+		StopReason: "tool_use",
+		Content: []ContentBlock{
+			{Type: "text", Text: "Let me check."},
+			{Type: "tool_use", ID: "toolu_02", Name: "bash", Input: map[string]any{"command": "ls"}},
+		},
+		Usage: &Usage{InputTokens: 20, OutputTokens: 20},
+	}
+
+	events := SynthesizeEvents(resp)
+
+	// message_start + (start+delta+stop)*2 + message_delta + message_stop = 1 + 6 + 2 = 9
+	if len(events) != 9 {
+		t.Fatalf("len(events) = %d, want 9", len(events))
+	}
+}
+
+func TestSynthesizeEvents_RoundTrip(t *testing.T) {
+	original := &MessagesResponse{
+		ID:         "msg_rt",
+		Type:       "message",
+		Role:       "assistant",
+		Model:      "claude-sonnet-4-20250514",
+		StopReason: "end_turn",
+		Content: []ContentBlock{
+			{Type: "text", Text: "Hello world"},
+		},
+		Usage: &Usage{InputTokens: 25, OutputTokens: 10},
+	}
+
+	events := SynthesizeEvents(original)
+	rebuilt, err := ReassembleFromEvents(events)
+	if err != nil {
+		t.Fatalf("ReassembleFromEvents: %v", err)
+	}
+
+	if rebuilt.ID != original.ID {
+		t.Errorf("ID = %q, want %q", rebuilt.ID, original.ID)
+	}
+	if rebuilt.StopReason != original.StopReason {
+		t.Errorf("StopReason = %q, want %q", rebuilt.StopReason, original.StopReason)
+	}
+	if len(rebuilt.Content) != len(original.Content) {
+		t.Fatalf("len(Content) = %d, want %d", len(rebuilt.Content), len(original.Content))
+	}
+	if rebuilt.Content[0].Text != original.Content[0].Text {
+		t.Errorf("Text = %q, want %q", rebuilt.Content[0].Text, original.Content[0].Text)
+	}
+}
+
+func TestSynthesizeEvents_ToolUseRoundTrip(t *testing.T) {
+	original := &MessagesResponse{
+		ID:         "msg_rt2",
+		Type:       "message",
+		Role:       "assistant",
+		Model:      "claude-sonnet-4-20250514",
+		StopReason: "tool_use",
+		Content: []ContentBlock{
+			{Type: "text", Text: "Let me look that up."},
+			{Type: "tool_use", ID: "toolu_03", Name: "get_weather", Input: map[string]any{"location": "SF"}},
+		},
+		Usage: &Usage{InputTokens: 30, OutputTokens: 20},
+	}
+
+	events := SynthesizeEvents(original)
+	rebuilt, err := ReassembleFromEvents(events)
+	if err != nil {
+		t.Fatalf("ReassembleFromEvents: %v", err)
+	}
+
+	if len(rebuilt.Content) != 2 {
+		t.Fatalf("len(Content) = %d, want 2", len(rebuilt.Content))
+	}
+	if rebuilt.Content[0].Text != "Let me look that up." {
+		t.Errorf("Content[0].Text = %q", rebuilt.Content[0].Text)
+	}
+	if rebuilt.Content[1].Name != "get_weather" {
+		t.Errorf("Content[1].Name = %q", rebuilt.Content[1].Name)
+	}
+	loc, _ := rebuilt.Content[1].Input["location"]
+	if loc != "SF" {
+		t.Errorf("Input[location] = %v, want %q", loc, "SF")
+	}
+}
