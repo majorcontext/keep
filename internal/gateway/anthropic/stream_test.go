@@ -120,7 +120,7 @@ func TestReassembleFromEvents_MultiBlock(t *testing.T) {
 	if resp.Content[1].Type != "tool_use" || resp.Content[1].Name != "bash" {
 		t.Errorf("Content[1] = %+v, want tool_use 'bash'", resp.Content[1])
 	}
-	cmd, _ := resp.Content[1].Input["command"]
+	cmd := resp.Content[1].Input["command"]
 	if cmd != "ls" {
 		t.Errorf("Input[command] = %v, want %q", cmd, "ls")
 	}
@@ -352,7 +352,7 @@ func TestSynthesizeEvents_ToolUseRoundTrip(t *testing.T) {
 	if rebuilt.Content[1].Name != "get_weather" {
 		t.Errorf("Content[1].Name = %q", rebuilt.Content[1].Name)
 	}
-	loc, _ := rebuilt.Content[1].Input["location"]
+	loc := rebuilt.Content[1].Input["location"]
 	if loc != "SF" {
 		t.Errorf("Input[location] = %v, want %q", loc, "SF")
 	}
