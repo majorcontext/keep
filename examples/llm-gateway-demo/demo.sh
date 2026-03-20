@@ -3,12 +3,10 @@
 # Keep LLM Gateway Demo
 #
 # Runs the keep-llm-gateway in front of the Anthropic API and demonstrates
-# policy enforcement. Uses `claude -p` for streaming and curl for structured
-# requests (redaction).
+# policy enforcement: streaming, redaction, and audit logging.
 #
 # Prerequisites:
-#   - claude CLI installed with valid credentials
-#   - ANTHROPIC_API_KEY set (for curl-based tests)
+#   - ANTHROPIC_API_KEY set in your environment
 #
 # Usage:
 #   ./examples/llm-gateway-demo/demo.sh
@@ -26,6 +24,11 @@ cleanup() {
 }
 trap cleanup EXIT
 
+if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
+  echo "ANTHROPIC_API_KEY is not set. Export it and re-run."
+  exit 1
+fi
+
 echo "=== Keep LLM Gateway Demo ==="
 echo ""
 
@@ -36,7 +39,6 @@ echo "  done"
 echo ""
 
 # ── Start gateway ─────────────────────────────────────────────────
-# Generate config from template, filling in runtime paths.
 sed \
   -e "s|RULES_DIR|$SCRIPT_DIR/rules|" \
   -e "s|LOG_OUTPUT|$DEMO_DIR/audit.jsonl|" \
@@ -49,67 +51,91 @@ sleep 1
 echo "  Gateway running (PID $GW_PID)"
 echo ""
 
-# ── Test 1: claude -p through gateway ─────────────────────────────
+GW_URL="http://localhost:${GW_PORT}/v1/messages"
+GW_HEADERS=(-H "Content-Type: application/json" -H "anthropic-version: 2023-06-01" -H "x-api-key: $ANTHROPIC_API_KEY")
+
+# ── Test 1: Streaming request ─────────────────────────────────────
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Test 1: claude -p through the gateway (streaming)"
-echo ""
-echo "  ANTHROPIC_BASE_URL=http://localhost:${GW_PORT} claude -p 'What is 2+2?'"
+echo "Test 1: Streaming request through the gateway"
 echo ""
 
-CLAUDE_OUTPUT=$(ANTHROPIC_BASE_URL="http://localhost:${GW_PORT}" \
-  claude -p "What is 2+2? Answer in exactly one word, no punctuation." \
-  --model claude-haiku-4-5-20251001 \
-  --max-turns 1 \
-  2>&1) || true
+RESPONSE=$(curl -s -w "\n%{http_code}" "$GW_URL" "${GW_HEADERS[@]}" \
+  -d '{
+    "model": "claude-haiku-4-5-20251001",
+    "max_tokens": 30,
+    "stream": true,
+    "messages": [{"role": "user", "content": "What is 2+2? Answer in one word."}]
+  }' 2>&1)
 
-if [ -n "$CLAUDE_OUTPUT" ]; then
-  echo "  ✓ Claude response: $CLAUDE_OUTPUT"
+HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+if [ "$HTTP_CODE" = "200" ]; then
+  EVENT_COUNT=$(echo "$BODY" | grep -c "^event:" || true)
+  echo "  ✓ HTTP 200 — Received $EVENT_COUNT SSE events (buffered, policy-evaluated, replayed)"
 else
-  echo "  ✗ claude -p produced no output"
-  echo "    Make sure claude is installed and has valid credentials."
+  echo "  ✗ HTTP $HTTP_CODE — $BODY"
+  echo ""
+  echo "  Check that ANTHROPIC_API_KEY is valid."
+  exit 1
 fi
 echo ""
 
-# ── Test 2: Secret redaction ──────────────────────────────────────
+# ── Test 2: Non-streaming request ─────────────────────────────────
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Test 2: Secret redaction in tool results"
+echo "Test 2: Non-streaming request through the gateway"
+echo ""
+
+RESPONSE=$(curl -s -w "\n%{http_code}" "$GW_URL" "${GW_HEADERS[@]}" \
+  -d '{
+    "model": "claude-haiku-4-5-20251001",
+    "max_tokens": 30,
+    "messages": [{"role": "user", "content": "What is 2+2? Answer in one word."}]
+  }' 2>&1)
+
+HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+if [ "$HTTP_CODE" = "200" ]; then
+  ANSWER=$(echo "$BODY" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r['content'][0]['text'])" 2>/dev/null || echo "$BODY")
+  echo "  ✓ HTTP 200 — Model said: $ANSWER"
+else
+  echo "  ✗ HTTP $HTTP_CODE — $BODY"
+fi
+echo ""
+
+# ── Test 3: Secret redaction ──────────────────────────────────────
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Test 3: Secret redaction in tool results"
 echo ""
 echo "  Sending a tool_result containing an AWS key and password."
 echo "  The gateway redacts secrets before forwarding to the model."
 echo ""
 
-if [ -z "${ANTHROPIC_API_KEY:-}" ]; then
-  echo "  ~ Skipped: ANTHROPIC_API_KEY not set (needed for curl-based tests)"
+RESPONSE=$(curl -s -w "\n%{http_code}" "$GW_URL" "${GW_HEADERS[@]}" \
+  -d '{
+    "model": "claude-haiku-4-5-20251001",
+    "max_tokens": 100,
+    "messages": [
+      {"role": "user", "content": "Read the .env file"},
+      {"role": "assistant", "content": [
+        {"type": "tool_use", "id": "tool_1", "name": "bash", "input": {"command": "cat .env"}}
+      ]},
+      {"role": "user", "content": [
+        {"type": "tool_result", "tool_use_id": "tool_1", "content": "DB_HOST=localhost\nAWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\npassword = hunter2\nAPP_NAME=myapp"}
+      ]}
+    ]
+  }' 2>&1)
+
+HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+if [ "$HTTP_CODE" = "200" ]; then
+  echo "  ✓ HTTP 200 — Model responded (secrets were redacted before reaching it)"
+  ANSWER=$(echo "$BODY" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r['content'][0]['text'][:200])" 2>/dev/null || echo "(parse error)")
+  echo "  Model said: $ANSWER"
 else
-  RESPONSE=$(curl -s -w "\n%{http_code}" \
-    "http://localhost:${GW_PORT}/v1/messages" \
-    -H "Content-Type: application/json" \
-    -H "anthropic-version: 2023-06-01" \
-    -H "x-api-key: $ANTHROPIC_API_KEY" \
-    -d '{
-      "model": "claude-haiku-4-5-20251001",
-      "max_tokens": 100,
-      "messages": [
-        {"role": "user", "content": "Read the .env file"},
-        {"role": "assistant", "content": [
-          {"type": "tool_use", "id": "tool_1", "name": "bash", "input": {"command": "cat .env"}}
-        ]},
-        {"role": "user", "content": [
-          {"type": "tool_result", "tool_use_id": "tool_1", "content": "DB_HOST=localhost\nAWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE\npassword = hunter2\nAPP_NAME=myapp"}
-        ]}
-      ]
-    }' 2>&1)
-
-  HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-  BODY=$(echo "$RESPONSE" | sed '$d')
-
-  if [ "$HTTP_CODE" = "200" ]; then
-    echo "  ✓ HTTP 200 — Model responded (secrets were redacted before reaching it)"
-    ANSWER=$(echo "$BODY" | python3 -c "import json,sys; r=json.load(sys.stdin); print(r['content'][0]['text'][:200])" 2>/dev/null || echo "(parse error)")
-    echo "  Model said: $ANSWER"
-  else
-    echo "  ✗ HTTP $HTTP_CODE — $BODY"
-  fi
+  echo "  ✗ HTTP $HTTP_CODE — $BODY"
 fi
 echo ""
 
@@ -144,5 +170,8 @@ echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "Demo complete."
 echo ""
+echo "You can also point claude at the gateway:"
+echo "  ANTHROPIC_BASE_URL=http://localhost:${GW_PORT} claude"
+echo ""
 echo "Response deny (blocking destructive commands) is covered by unit tests:"
-echo "  make test-unit ARGS='-run TestProxy_StreamingDenyResponse ./internal/gateway'"
+echo "  make test-unit ARGS='-run TestProxy_DenyResponse ./internal/gateway'"
