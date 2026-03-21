@@ -10,6 +10,7 @@ import (
 	keepcel "github.com/majorcontext/keep/internal/cel"
 	"github.com/majorcontext/keep/internal/config"
 	"github.com/majorcontext/keep/internal/redact"
+	"github.com/majorcontext/keep/internal/secrets"
 )
 
 // Decision is the outcome of a policy evaluation.
@@ -89,6 +90,7 @@ type Evaluator struct {
 	mode    config.Mode
 	onError config.ErrorMode
 	scope   string
+	secrets *secrets.Detector
 }
 
 // NewEvaluator creates an evaluator for a scope. Compiles all CEL expressions
@@ -102,6 +104,7 @@ func NewEvaluator(
 	rules []config.Rule,
 	aliases map[string]string,
 	defs map[string]string,
+	detector *secrets.Detector,
 ) (*Evaluator, error) {
 	compiled := make([]compiledRule, 0, len(rules))
 	for _, r := range rules {
@@ -118,11 +121,13 @@ func NewEvaluator(
 		}
 
 		if r.Action == config.ActionRedact && r.Redact != nil {
-			patterns, err := redact.CompilePatterns(r.Redact.Patterns)
-			if err != nil {
-				return nil, fmt.Errorf("rule %q: compile redact patterns: %w", r.Name, err)
+			if len(r.Redact.Patterns) > 0 {
+				patterns, err := redact.CompilePatterns(r.Redact.Patterns)
+				if err != nil {
+					return nil, fmt.Errorf("rule %q: compile redact patterns: %w", r.Name, err)
+				}
+				cr.patterns = patterns
 			}
-			cr.patterns = patterns
 		}
 
 		compiled = append(compiled, cr)
@@ -145,6 +150,7 @@ func NewEvaluator(
 		mode:    mode,
 		onError: onError,
 		scope:   scope,
+		secrets: detector,
 	}, nil
 }
 
@@ -285,6 +291,27 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 
 		case config.ActionRedact:
 			if cr.rule.Redact != nil && !auditOnly {
+				// Run gitleaks secret detection first if enabled.
+				if cr.rule.Redact.Secrets && ev.secrets != nil {
+					target := cr.rule.Redact.Target
+					keys := strings.Split(strings.TrimPrefix(target, "params."), ".")
+					if val := getNestedString(celParams, keys); val != "" {
+						redacted, findings := ev.secrets.Redact(val)
+						if len(findings) > 0 {
+							sm := []redact.Mutation{{
+								Path:     target,
+								Original: val,
+								Replaced: redacted,
+							}}
+							if firstRedactRule == "" {
+								firstRedactRule = cr.rule.Name
+							}
+							celParams = redact.ApplyMutations(celParams, sm)
+							mutations = append(mutations, sm...)
+						}
+					}
+				}
+				// Then run custom regex patterns on the (possibly already-redacted) text.
 				m := redact.Apply(celParams, cr.rule.Redact.Target, cr.patterns)
 				if len(m) > 0 {
 					if firstRedactRule == "" {
@@ -391,6 +418,30 @@ func operationSpecificity(pattern string) int {
 		return 1
 	}
 	return 0
+}
+
+// getNestedString retrieves a string value from a nested map by key path.
+func getNestedString(params map[string]any, keys []string) string {
+	current := params
+	for i, key := range keys {
+		v, ok := current[key]
+		if !ok {
+			return ""
+		}
+		if i == len(keys)-1 {
+			s, ok := v.(string)
+			if !ok {
+				return ""
+			}
+			return s
+		}
+		nested, ok := v.(map[string]any)
+		if !ok {
+			return ""
+		}
+		current = nested
+	}
+	return ""
 }
 
 // paramsSummary returns a JSON-serialized summary of params, truncated to 256 runes.

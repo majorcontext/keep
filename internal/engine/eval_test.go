@@ -6,6 +6,7 @@ import (
 
 	keepcel "github.com/majorcontext/keep/internal/cel"
 	"github.com/majorcontext/keep/internal/config"
+	"github.com/majorcontext/keep/internal/secrets"
 )
 
 func makeEvaluator(t *testing.T, rules []config.Rule) *Evaluator {
@@ -14,7 +15,7 @@ func makeEvaluator(t *testing.T, rules []config.Rule) *Evaluator {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev, err := NewEvaluator(env, "test-scope", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil)
+	ev, err := NewEvaluator(env, "test-scope", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -385,7 +386,7 @@ func makeEvaluatorWithDefs(t *testing.T, rules []config.Rule, defs map[string]st
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev, err := NewEvaluator(env, "test-scope", config.ModeEnforce, config.ErrorModeClosed, rules, nil, defs)
+	ev, err := NewEvaluator(env, "test-scope", config.ModeEnforce, config.ErrorModeClosed, rules, nil, defs, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -472,5 +473,85 @@ func TestEval_DefsStringLiteral(t *testing.T) {
 	result = ev.Evaluate(makeCall("push", map[string]any{"branch": "main"}))
 	if result.Decision != Allow {
 		t.Errorf("expected Allow for main branch, got %s", result.Decision)
+	}
+}
+
+func TestEval_RedactSecrets(t *testing.T) {
+	det, err := secrets.NewDetector()
+	if err != nil {
+		t.Fatal(err)
+	}
+	celEnv, err := keepcel.NewEnv(keepcel.WithSecretDetector(det))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := []config.Rule{
+		{
+			Name:   "redact-secrets",
+			Match:  config.Match{Operation: "llm.text"},
+			Action: config.ActionRedact,
+			Redact: &config.RedactSpec{
+				Target:  "params.text",
+				Secrets: true,
+			},
+		},
+	}
+	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, det)
+	if err != nil {
+		t.Fatal(err)
+	}
+	result := ev.Evaluate(Call{
+		Operation: "llm.text",
+		Params:    map[string]any{"text": "key is AKIAIOSFODNN7REALKEY"},
+		Context:   CallContext{Timestamp: time.Now()},
+	})
+	if result.Decision != Redact {
+		t.Errorf("expected Redact, got %s", result.Decision)
+	}
+	if len(result.Mutations) == 0 {
+		t.Error("expected mutations")
+	}
+}
+
+func TestEval_HasSecretsInWhen(t *testing.T) {
+	det, err := secrets.NewDetector()
+	if err != nil {
+		t.Fatal(err)
+	}
+	celEnv, err := keepcel.NewEnv(keepcel.WithSecretDetector(det))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rules := []config.Rule{
+		{
+			Name:    "deny-secrets",
+			Match:   config.Match{Operation: "llm.text", When: "hasSecrets(params.text)"},
+			Action:  config.ActionDeny,
+			Message: "secrets detected",
+		},
+	}
+	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, det)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should deny when text contains a secret.
+	result := ev.Evaluate(Call{
+		Operation: "llm.text",
+		Params:    map[string]any{"text": "key is AKIAIOSFODNN7REALKEY"},
+		Context:   CallContext{Timestamp: time.Now()},
+	})
+	if result.Decision != Deny {
+		t.Errorf("expected Deny, got %s", result.Decision)
+	}
+
+	// Should allow when text is clean.
+	result = ev.Evaluate(Call{
+		Operation: "llm.text",
+		Params:    map[string]any{"text": "nothing secret here"},
+		Context:   CallContext{Timestamp: time.Now()},
+	})
+	if result.Decision != Allow {
+		t.Errorf("expected Allow, got %s", result.Decision)
 	}
 }

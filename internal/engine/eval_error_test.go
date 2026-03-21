@@ -16,7 +16,7 @@ func makeEvaluatorWithMode(t *testing.T, mode config.Mode, onError config.ErrorM
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev, err := NewEvaluator(env, "test-scope", mode, onError, rules, nil, nil)
+	ev, err := NewEvaluator(env, "test-scope", mode, onError, rules, nil, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
