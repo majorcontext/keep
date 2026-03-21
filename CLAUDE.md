@@ -41,3 +41,7 @@ make test-unit ARGS='-run TestName ./internal/engine'
 - Follow standard Go conventions and `go fmt`
 - Error messages should be actionable -- tell users exactly what to do
 - Documentation must match actual behavior
+
+## Superpowers Overrides
+
+- Save specs and plans to `docs/plans/` (not `docs/superpowers/`)
