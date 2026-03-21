@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
@@ -59,7 +60,20 @@ func main() {
 	}
 
 	// 4. Create proxy
-	proxy, err := gateway.NewProxy(engine, cfg, logger)
+	var proxyOpts []gateway.ProxyOption
+	if debugPath := os.Getenv("KEEP_DEBUG"); debugPath != "" {
+		debugFile, err := os.OpenFile(debugPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error opening debug log: %v\n", err)
+			os.Exit(1)
+		}
+		defer debugFile.Close() //nolint:errcheck
+		debugLogger := slog.New(slog.NewTextHandler(debugFile, &slog.HandlerOptions{Level: slog.LevelDebug}))
+		proxyOpts = append(proxyOpts, gateway.WithDebugLogger(debugLogger))
+		log.Printf("debug logging enabled: %s", debugPath)
+	}
+
+	proxy, err := gateway.NewProxy(engine, cfg, logger, proxyOpts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating proxy: %v\n", err)
 		os.Exit(1)

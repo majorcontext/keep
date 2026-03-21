@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -31,12 +32,13 @@ type Proxy struct {
 	upstream  *url.URL
 	decompose gwconfig.DecomposeConfig
 	logger    *audit.Logger
+	debug     *slog.Logger
 	passthru  *httputil.ReverseProxy // for non-messages passthrough
 	client    *http.Client           // for /v1/messages upstream requests
 }
 
 // NewProxy creates an LLM gateway proxy.
-func NewProxy(engine *keep.Engine, cfg *gwconfig.GatewayConfig, logger *audit.Logger) (*Proxy, error) {
+func NewProxy(engine *keep.Engine, cfg *gwconfig.GatewayConfig, logger *audit.Logger, opts ...ProxyOption) (*Proxy, error) {
 	upstream, err := url.Parse(cfg.Upstream)
 	if err != nil {
 		return nil, fmt.Errorf("gateway: invalid upstream URL: %w", err)
@@ -44,7 +46,7 @@ func NewProxy(engine *keep.Engine, cfg *gwconfig.GatewayConfig, logger *audit.Lo
 
 	rp := httputil.NewSingleHostReverseProxy(upstream)
 
-	return &Proxy{
+	p := &Proxy{
 		engine:    engine,
 		scope:     cfg.Scope,
 		upstream:  upstream,
@@ -55,13 +57,33 @@ func NewProxy(engine *keep.Engine, cfg *gwconfig.GatewayConfig, logger *audit.Lo
 		// ensuring the upstream error response has time to be written back
 		// before the server closes the connection.
 		client: &http.Client{Timeout: 110 * time.Second},
-	}, nil
+	}
+	for _, o := range opts {
+		o(p)
+	}
+	return p, nil
+}
+
+// ProxyOption configures optional Proxy behavior.
+type ProxyOption func(*Proxy)
+
+// WithDebugLogger enables debug logging to the given slog.Logger.
+func WithDebugLogger(l *slog.Logger) ProxyOption {
+	return func(p *Proxy) { p.debug = l }
+}
+
+// logDebug emits a debug log if debug logging is enabled.
+func (p *Proxy) logDebug(msg string, args ...any) {
+	if p.debug != nil {
+		p.debug.Debug(msg, args...)
+	}
 }
 
 // ServeHTTP intercepts /v1/messages requests for policy evaluation.
 // All other paths are reverse-proxied without evaluation.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/v1/messages" {
+		p.logDebug("passthrough", "method", r.Method, "path", r.URL.Path)
 		p.passthru.ServeHTTP(w, r)
 		return
 	}
@@ -119,6 +141,16 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	mode := "non-streaming"
+	if req.Stream {
+		mode = "streaming"
+	}
+	p.logDebug("request",
+		"model", req.Model,
+		"mode", mode,
+		"messages", len(req.Messages),
+	)
+
 	// 3. Decompose request into calls.
 	calls := anthropic.DecomposeRequest(&req, p.scope, p.decompose)
 
@@ -136,6 +168,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 	hasRedaction := false
 	blockResults := make([]anthropic.BlockResult, len(blockMap))
 
+	var redactedRules []string
 	for i, call := range calls {
 		result, evalErr := p.engine.Evaluate(call, p.scope)
 		if evalErr != nil {
@@ -150,6 +183,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 		// Check for deny.
 		if result.Decision == keep.Deny {
+			p.logDebug("request denied", "rule", result.Rule, "message", result.Message)
 			writePolicyDeny(w, result.Rule, result.Message)
 			return
 		}
@@ -163,10 +197,17 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 				blockResults[blockIdx].Result = result
 				if result.Decision == keep.Redact {
 					hasRedaction = true
+					redactedRules = append(redactedRules, result.Rule)
 				}
 			}
 		}
 	}
+
+	p.logDebug("request policy",
+		"calls", len(calls),
+		"redacted", hasRedaction,
+		"redacted_rules", strings.Join(redactedRules, ","),
+	)
 
 	// 6. Reassemble if redacted.
 	forwardBody := body
@@ -194,12 +235,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Copy relevant headers.
-	for _, h := range []string{"Authorization", "Content-Type", "anthropic-version", "x-api-key"} {
-		if v := r.Header.Get(h); v != "" {
-			upstreamReq.Header.Set(h, v)
-		}
-	}
+	copyRequestHeaders(upstreamReq, r)
 
 	upstreamResp, err := p.client.Do(upstreamReq)
 	if err != nil {
@@ -258,6 +294,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 		// 12. Check for deny.
 		if result.Decision == keep.Deny {
+			p.logDebug("response denied", "rule", result.Rule, "message", result.Message)
 			writePolicyDeny(w, result.Rule, result.Message)
 			return
 		}
@@ -272,6 +309,8 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 			})
 		}
 	}
+
+	p.logDebug("response policy", "status", upstreamResp.StatusCode, "calls", len(respCalls), "redacted", respHasRedaction)
 
 	// 13. Reassemble if redacted.
 	finalBody := respBody
@@ -324,11 +363,7 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
-	for _, h := range []string{"Authorization", "Content-Type", "anthropic-version", "x-api-key"} {
-		if v := r.Header.Get(h); v != "" {
-			upstreamReq.Header.Set(h, v)
-		}
-	}
+	copyRequestHeaders(upstreamReq, r)
 
 	upstreamResp, err := p.client.Do(upstreamReq)
 	if err != nil {
@@ -357,6 +392,7 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 			break
 		}
 		if err != nil {
+			p.logDebug("stream read error", "err", err, "events_so_far", len(events))
 			writeInternalError(w, "failed to read upstream SSE stream")
 			return
 		}
@@ -365,6 +401,8 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 			break
 		}
 	}
+
+	p.logDebug("upstream stream", "status", upstreamResp.StatusCode, "events", len(events))
 
 	// 4. Reassemble into MessagesResponse.
 	resp, err := anthropic.ReassembleFromEvents(events)
@@ -396,6 +434,7 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 		}
 
 		if result.Decision == keep.Deny {
+			p.logDebug("response denied", "rule", result.Rule, "message", result.Message)
 			writePolicyDeny(w, result.Rule, result.Message)
 			return
 		}
@@ -410,6 +449,8 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 			})
 		}
 	}
+
+	p.logDebug("response policy", "calls", len(respCalls), "redacted", respHasRedaction)
 
 	// 6. Determine which events to send.
 	var outEvents []sse.Event
@@ -434,6 +475,35 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 	for _, ev := range outEvents {
 		if err := sseWriter.WriteEvent(ev); err != nil {
 			return
+		}
+	}
+}
+
+// hopByHopHeaders are HTTP/1.1 hop-by-hop headers that must not be forwarded.
+var hopByHopHeaders = map[string]bool{
+	"Connection":          true,
+	"Keep-Alive":          true,
+	"Proxy-Authenticate":  true,
+	"Proxy-Authorization": true,
+	"Te":                  true,
+	"Trailer":             true,
+	"Transfer-Encoding":   true,
+	"Upgrade":             true,
+	"Host":                true,
+	"Content-Length":       true, // recalculated by http.Client for the new body
+	"Accept-Encoding":     true, // let Go's Transport handle compression transparently
+}
+
+// copyRequestHeaders copies all headers from the incoming request to the upstream request,
+// skipping hop-by-hop headers. This ensures auth headers, vendor-specific headers, and
+// any other headers Claude Code sends are forwarded transparently.
+func copyRequestHeaders(dst *http.Request, src *http.Request) {
+	for key, values := range src.Header {
+		if hopByHopHeaders[http.CanonicalHeaderKey(key)] {
+			continue
+		}
+		for _, v := range values {
+			dst.Header.Add(key, v)
 		}
 	}
 }
