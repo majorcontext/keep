@@ -132,6 +132,7 @@ var reservedDefNames = map[string]bool{
 	"upper":          true,
 	"matchesDomain":  true,
 	"dayOfWeek":      true,
+	"hassecrets":     true,
 	"int":            true,
 	"uint":           true,
 	"double":         true,
@@ -184,9 +185,9 @@ func validateRedact(i int, spec *RedactSpec) []error {
 		errs = append(errs, fmt.Errorf("rules[%d]: redact target %q must be a params.* path", i, spec.Target))
 	}
 
-	// patterns must be non-empty and not exceed maxPatternsPerRedact
-	if len(spec.Patterns) == 0 {
-		errs = append(errs, fmt.Errorf("rules[%d]: redact patterns must not be empty", i))
+	// Must have secrets: true or non-empty patterns (or both)
+	if !spec.Secrets && len(spec.Patterns) == 0 {
+		errs = append(errs, fmt.Errorf("rules[%d]: redact requires secrets: true or non-empty patterns", i))
 	} else if len(spec.Patterns) > maxPatternsPerRedact {
 		errs = append(errs, fmt.Errorf("rules[%d]: redact patterns: %d patterns exceeds maximum of %d", i, len(spec.Patterns), maxPatternsPerRedact))
 	} else {

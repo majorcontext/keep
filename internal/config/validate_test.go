@@ -509,3 +509,56 @@ func TestValidate_DefsValueTooLong(t *testing.T) {
 	}
 }
 
+func TestValidate_RedactSecretsOnly(t *testing.T) {
+	rf := &RuleFile{
+		Scope: "test-scope",
+		Rules: []Rule{
+			{
+				Name:   "redact-secrets",
+				Match:  Match{Operation: "llm.text"},
+				Action: ActionRedact,
+				Redact: &RedactSpec{
+					Target:  "params.text",
+					Secrets: true,
+				},
+			},
+		},
+	}
+	if err := Validate(rf); err != nil {
+		t.Errorf("expected secrets-only redact rule to be valid, got: %v", err)
+	}
+}
+
+func TestValidate_RedactNoSecretsNoPatterns(t *testing.T) {
+	rf := &RuleFile{
+		Scope: "test-scope",
+		Rules: []Rule{
+			{
+				Name:   "bad-redact",
+				Match:  Match{Operation: "llm.text"},
+				Action: ActionRedact,
+				Redact: &RedactSpec{
+					Target: "params.text",
+				},
+			},
+		},
+	}
+	if err := Validate(rf); err == nil {
+		t.Error("expected error for redact rule with no secrets and no patterns")
+	}
+}
+
+func TestValidate_DefNameHasSecrets(t *testing.T) {
+	rf := &RuleFile{
+		Scope: "test-scope",
+		Rules: []Rule{
+			{Name: "r1", Match: Match{Operation: "op"}, Action: ActionLog},
+		},
+		Defs: map[string]string{"hassecrets": "'shadowed'"},
+	}
+	err := Validate(rf)
+	if err == nil || !strings.Contains(err.Error(), "shadows") {
+		t.Errorf("expected shadow error for hasSecrets def, got: %v", err)
+	}
+}
+

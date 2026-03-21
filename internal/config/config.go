@@ -56,7 +56,8 @@ const (
 // RedactSpec defines what to redact and how.
 type RedactSpec struct {
 	Target   string          `yaml:"target"`
-	Patterns []RedactPattern `yaml:"patterns"`
+	Secrets  bool            `yaml:"secrets,omitempty"`
+	Patterns []RedactPattern `yaml:"patterns,omitempty"`
 }
 
 // RedactPattern is a regex pattern and its replacement.
