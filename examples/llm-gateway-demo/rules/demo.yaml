@@ -12,11 +12,7 @@ rules:
     action: redact
     redact:
       target: "params.text"
-      patterns:
-        - match: "AKIA[0-9A-Z]{16}"
-          replace: "[REDACTED:AWS_KEY]"
-        - match: "(?i)(api[_ ]?key|password|secret|token)\\s*[:=]\\s*\\S+"
-          replace: "[REDACTED:SECRET]"
+      secrets: true
 
   # Redact secrets from tool results before they reach the model
   - name: redact-secrets-in-tool-results
@@ -25,11 +21,7 @@ rules:
     action: redact
     redact:
       target: "params.content"
-      patterns:
-        - match: "AKIA[0-9A-Z]{16}"
-          replace: "[REDACTED:AWS_KEY]"
-        - match: "(?i)(api[_ ]?key|password|secret|token)\\s*[:=]\\s*\\S+"
-          replace: "[REDACTED:SECRET]"
+      secrets: true
 
   # Block destructive bash commands from the model
   - name: block-destructive-bash
