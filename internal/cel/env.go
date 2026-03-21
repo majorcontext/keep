@@ -11,6 +11,7 @@ import (
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
 	"github.com/majorcontext/keep/internal/rate"
+	"github.com/majorcontext/keep/internal/secrets"
 )
 
 // Env is Keep's configured CEL environment with custom functions.
@@ -22,7 +23,16 @@ type Env struct {
 type EnvOption func(*envConfig)
 
 type envConfig struct {
-	rateStore *rate.Store
+	rateStore      *rate.Store
+	secretDetector *secrets.Detector
+}
+
+// WithSecretDetector configures the CEL environment with a secret detector,
+// enabling the hasSecrets(field) function.
+func WithSecretDetector(d *secrets.Detector) EnvOption {
+	return func(cfg *envConfig) {
+		cfg.secretDetector = d
+	}
 }
 
 // WithRateStore configures the CEL environment with a rate counter store,
@@ -202,6 +212,22 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 						return types.String("")
 					}
 					return types.String(DayOfWeekTZ(string(tz), ts.Time))
+				}),
+			),
+		),
+
+		// hasSecrets(string) bool — returns true if gitleaks detects secrets
+		cel.Function("hasSecrets",
+			cel.Overload("hasSecrets_string",
+				[]*cel.Type{cel.StringType},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					s, ok := val.(types.String)
+					if !ok {
+						return types.Bool(false)
+					}
+					findings := cfg.secretDetector.Detect(string(s))
+					return types.Bool(len(findings) > 0)
 				}),
 			),
 		),

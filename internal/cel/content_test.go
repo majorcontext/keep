@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	keepcel "github.com/majorcontext/keep/internal/cel"
+	"github.com/majorcontext/keep/internal/secrets"
 )
 
 // --- Unit tests for content helper functions ---
@@ -61,5 +62,43 @@ func TestEstimateTokens_CEL(t *testing.T) {
 	}
 	if !got {
 		t.Error("expected true: long string should have token estimate > 10")
+	}
+}
+
+func TestHasSecrets_True(t *testing.T) {
+	det, err := secrets.NewDetector()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := keepcel.NewEnv(keepcel.WithSecretDetector(det))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog := mustCompile(t, env, "hasSecrets(params.text)")
+	got, err := prog.Eval(map[string]any{"text": "key is AKIAIOSFODNN7REALKEY"}, nil)
+	if err != nil {
+		t.Fatalf("Eval() error: %v", err)
+	}
+	if !got {
+		t.Error("expected hasSecrets to return true for AWS key")
+	}
+}
+
+func TestHasSecrets_False(t *testing.T) {
+	det, err := secrets.NewDetector()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := keepcel.NewEnv(keepcel.WithSecretDetector(det))
+	if err != nil {
+		t.Fatal(err)
+	}
+	prog := mustCompile(t, env, "hasSecrets(params.text)")
+	got, err := prog.Eval(map[string]any{"text": "nothing secret here"}, nil)
+	if err != nil {
+		t.Fatalf("Eval() error: %v", err)
+	}
+	if got {
+		t.Error("expected hasSecrets to return false for clean text")
 	}
 }
