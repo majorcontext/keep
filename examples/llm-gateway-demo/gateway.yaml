@@ -5,6 +5,10 @@ rules_dir: "RULES_DIR"
 provider: anthropic
 upstream: "https://api.anthropic.com"
 scope: demo-gateway
+decompose:
+  text: true
+  tool_result: true
+  tool_use: true
 log:
   format: json
   output: "LOG_OUTPUT"

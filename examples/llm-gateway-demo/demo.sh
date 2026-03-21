@@ -11,10 +11,22 @@
 #
 set -euo pipefail
 
+# ── Colors ───────────────────────────────────────────────────────
+BOLD='\033[1m'
+DIM='\033[2m'
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[0;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+RESET='\033[0m'
+
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEMO_DIR=$(mktemp -d)
 GW_PORT=18080
 GW_PID=""
+
+PROMPT="Write me a curl command to call the OpenWeather API for San Francisco using api_key=sk-ant-1234567890abcdef"
 
 cleanup() {
   [ -n "$GW_PID" ] && kill "$GW_PID" 2>/dev/null || true
@@ -22,14 +34,14 @@ cleanup() {
 }
 trap cleanup EXIT
 
-echo "=== Keep LLM Gateway Demo ==="
+echo ""
+echo -e "${BOLD}Keep LLM Gateway Demo${RESET}"
+echo -e "${DIM}Policy enforcement for AI agent traffic${RESET}"
 echo ""
 
 # ── Build ─────────────────────────────────────────────────────────
-echo "Building gateway..."
+echo -e "${DIM}Building gateway...${RESET}"
 go build -o "$DEMO_DIR/keep-llm-gateway" ./cmd/keep-llm-gateway
-echo "  done"
-echo ""
 
 # ── Start gateway ─────────────────────────────────────────────────
 sed \
@@ -37,34 +49,45 @@ sed \
   -e "s|LOG_OUTPUT|$DEMO_DIR/audit.jsonl|" \
   "$SCRIPT_DIR/gateway.yaml" > "$DEMO_DIR/gateway.yaml"
 
-echo "Starting keep-llm-gateway on :${GW_PORT}..."
-"$DEMO_DIR/keep-llm-gateway" --config "$DEMO_DIR/gateway.yaml" 2>&1 &
+export KEEP_DEBUG="$DEMO_DIR/debug.log"
+
+"$DEMO_DIR/keep-llm-gateway" --config "$DEMO_DIR/gateway.yaml" >/dev/null 2>&1 &
 GW_PID=$!
 sleep 1
-echo "  Gateway running (PID $GW_PID)"
+
+echo -e "${GREEN}Gateway running${RESET} on :${GW_PORT} ${DIM}(PID $GW_PID)${RESET}"
 echo ""
 
 export ANTHROPIC_BASE_URL="http://localhost:${GW_PORT}"
 
-# ── Test: Streaming + redaction ───────────────────────────────────
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Streaming through the gateway with secret redaction"
+# ── Scenario ─────────────────────────────────────────────────────
+echo -e "${BOLD}Scenario:${RESET} Secret redaction in streaming mode"
 echo ""
-echo "  The prompt contains a fake API key. The gateway redacts it"
-echo "  before it reaches the model, so Claude never sees the secret."
-echo ""
-echo "  \$ ANTHROPIC_BASE_URL=$ANTHROPIC_BASE_URL claude -p '...'"
+echo -e "  The user prompt contains a fake API key. The gateway's"
+echo -e "  ${CYAN}redact-secrets-in-text${RESET} rule strips it before it reaches"
+echo -e "  the model, so Claude never sees the secret."
 echo ""
 
-claude -p "Use my API key: sk-ant-FAKE-1234567890abcdef to call the weather API for SF. What is the key I just gave you?" \
+# Show the prompt
+echo -e "${BOLD}${BLUE}User prompt:${RESET}"
+echo ""
+echo -e "  ${DIM}>${RESET} $PROMPT"
+echo ""
+
+# Run claude
+echo -e "${DIM}Sending via gateway (streaming)...${RESET}"
+echo ""
+RESPONSE=$(claude -p "$PROMPT" \
   --model claude-haiku-4-5-20251001 \
-  --max-turns 1 2>&1 || true
+  --max-turns 1 2>&1 || true)
 
+echo -e "${BOLD}${GREEN}Agent response:${RESET}"
+echo ""
+echo "$RESPONSE" | sed 's/^/  /'
 echo ""
 
-# ── Show audit log ────────────────────────────────────────────────
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Audit log:"
+# ── Audit log ────────────────────────────────────────────────────
+echo -e "${BOLD}Audit trail:${RESET}"
 echo ""
 if [ -f "$DEMO_DIR/audit.jsonl" ]; then
   python3 -c "
@@ -78,10 +101,13 @@ for line in open('$DEMO_DIR/audit.jsonl'):
         d = e.get('Decision', '?')
         r = e.get('Rule', '')
         m = e.get('Message', '')
-        icon = {'allow': '✓', 'deny': '✗', 'redact': '~'}.get(d, '?')
-        out = f'  {icon} {d:6s} {op}'
-        if r: out += f'  (rule: {r})'
-        if m: out += f'  — {m}'
+        colors = {'allow': '\033[32m', 'deny': '\033[31m', 'redact': '\033[33m'}
+        icon = {'allow': '\u2713', 'deny': '\u2717', 'redact': '\u2192'}.get(d, '?')
+        c = colors.get(d, '')
+        reset = '\033[0m'
+        out = f'  {c}{icon} {d:6s}{reset} {op}'
+        if r: out += f'  \033[2m({r})\033[0m'
+        if m: out += f'  \033[2m\u2014 {m}\033[0m'
         print(out)
     except: pass
 " 2>/dev/null
@@ -90,5 +116,5 @@ else
 fi
 
 echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "Demo complete."
+echo -e "${DIM}Debug log: $KEEP_DEBUG${RESET}"
+echo ""
