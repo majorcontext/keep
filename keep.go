@@ -12,6 +12,7 @@ import (
 	"github.com/majorcontext/keep/internal/engine"
 	"github.com/majorcontext/keep/internal/rate"
 	"github.com/majorcontext/keep/internal/redact"
+	"github.com/majorcontext/keep/internal/secrets"
 )
 
 // Type aliases re-exported from internal packages.
@@ -35,6 +36,7 @@ type Engine struct {
 	mu         sync.RWMutex
 	evaluators map[string]*engine.Evaluator
 	rateStore  *rate.Store
+	secrets    *secrets.Detector
 	cfg        engineConfig
 }
 
@@ -74,14 +76,20 @@ func Load(rulesDir string, opts ...Option) (*Engine, error) {
 	// 2. Create rate store.
 	store := rate.NewStore()
 
+	// 2b. Create secrets detector.
+	detector, err := secrets.NewDetector()
+	if err != nil {
+		return nil, fmt.Errorf("keep: init secrets detector: %w", err)
+	}
+
 	// 3. Create CEL environment.
-	celEnv, err := keepcel.NewEnv(keepcel.WithRateStore(store))
+	celEnv, err := keepcel.NewEnv(keepcel.WithRateStore(store), keepcel.WithSecretDetector(detector))
 	if err != nil {
 		return nil, fmt.Errorf("keep: create cel env: %w", err)
 	}
 
 	// 4. Build evaluators for each scope.
-	evaluators, err := buildEvaluators(loadResult, celEnv, cfg)
+	evaluators, err := buildEvaluators(loadResult, celEnv, cfg, detector)
 	if err != nil {
 		return nil, err
 	}
@@ -91,6 +99,7 @@ func Load(rulesDir string, opts ...Option) (*Engine, error) {
 	return &Engine{
 		evaluators: evaluators,
 		rateStore:  store,
+		secrets:    detector,
 		cfg:        cfg,
 	}, nil
 }
@@ -137,12 +146,12 @@ func (e *Engine) Reload() error {
 		return fmt.Errorf("keep: reload: %w", err)
 	}
 
-	celEnv, err := keepcel.NewEnv(keepcel.WithRateStore(e.rateStore))
+	celEnv, err := keepcel.NewEnv(keepcel.WithRateStore(e.rateStore), keepcel.WithSecretDetector(e.secrets))
 	if err != nil {
 		return fmt.Errorf("keep: reload cel env: %w", err)
 	}
 
-	evaluators, err := buildEvaluators(loadResult, celEnv, e.cfg)
+	evaluators, err := buildEvaluators(loadResult, celEnv, e.cfg, e.secrets)
 	if err != nil {
 		return fmt.Errorf("keep: reload: %w", err)
 	}
@@ -161,7 +170,7 @@ func ApplyMutations(params map[string]any, mutations []Mutation) map[string]any 
 }
 
 // buildEvaluators creates compiled evaluators for every scope in the load result.
-func buildEvaluators(lr *config.LoadResult, celEnv *keepcel.Env, cfg engineConfig) (map[string]*engine.Evaluator, error) {
+func buildEvaluators(lr *config.LoadResult, celEnv *keepcel.Env, cfg engineConfig, detector *secrets.Detector) (map[string]*engine.Evaluator, error) {
 	evaluators := make(map[string]*engine.Evaluator, len(lr.Scopes))
 	for scopeName, rf := range lr.Scopes {
 		rules := lr.ResolvedRules[scopeName]
@@ -187,7 +196,7 @@ func buildEvaluators(lr *config.LoadResult, celEnv *keepcel.Env, cfg engineConfi
 			onError = config.ErrorModeClosed // default
 		}
 
-		ev, err := engine.NewEvaluator(celEnv, scopeName, mode, onError, rules, aliases, rf.Defs, nil)
+		ev, err := engine.NewEvaluator(celEnv, scopeName, mode, onError, rules, aliases, rf.Defs, detector)
 		if err != nil {
 			return nil, fmt.Errorf("keep: compile scope %q: %w", scopeName, err)
 		}

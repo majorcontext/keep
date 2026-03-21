@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/majorcontext/keep"
 )
@@ -286,6 +287,41 @@ func TestLoad_WithDefs(t *testing.T) {
 	}
 	if result.Decision != keep.Allow {
 		t.Errorf("Decision = %q, want %q for main branch", result.Decision, keep.Allow)
+	}
+}
+
+func TestLoad_SecretsRule(t *testing.T) {
+	dir := t.TempDir()
+	ruleYAML := `
+scope: test
+mode: enforce
+rules:
+  - name: redact-secrets
+    match:
+      operation: "llm.text"
+    action: redact
+    redact:
+      target: "params.text"
+      secrets: true
+`
+	os.WriteFile(filepath.Join(dir, "rules.yaml"), []byte(ruleYAML), 0644)
+
+	eng, err := keep.Load(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	result, err := eng.Evaluate(keep.Call{
+		Operation: "llm.text",
+		Params:    map[string]any{"text": "key is AKIAIOSFODNN7REALKEY"},
+		Context:   keep.CallContext{Timestamp: time.Now(), Scope: "test"},
+	}, "test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision != keep.Redact {
+		t.Errorf("expected Redact, got %s", result.Decision)
 	}
 }
 
