@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -125,6 +126,67 @@ routes:
 	_, err := Load(path)
 	if err == nil {
 		t.Fatal("expected error for route missing upstream, got nil")
+	}
+}
+
+func TestLoad_RouteWithCommandOnly(t *testing.T) {
+	yaml := `
+listen: ":8090"
+rules_dir: "./rules"
+routes:
+  - scope: test
+    command: npx
+    args:
+      - "-y"
+      - "some-server"
+`
+	path := writeTempYAML(t, yaml)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r := cfg.Routes[0]
+	if r.Command != "npx" {
+		t.Errorf("command: got %q, want %q", r.Command, "npx")
+	}
+	if len(r.Args) != 2 || r.Args[0] != "-y" || r.Args[1] != "some-server" {
+		t.Errorf("args: got %v, want [-y some-server]", r.Args)
+	}
+	if r.Upstream != "" {
+		t.Errorf("upstream: got %q, want empty", r.Upstream)
+	}
+}
+
+func TestLoad_RouteWithBothUpstreamAndCommand(t *testing.T) {
+	yaml := `
+listen: ":8090"
+rules_dir: "./rules"
+routes:
+  - scope: test
+    upstream: "https://example.com"
+    command: npx
+`
+	path := writeTempYAML(t, yaml)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for route with both upstream and command, got nil")
+	}
+	if got := err.Error(); !strings.Contains(got, "mutually exclusive") {
+		t.Errorf("error should mention mutually exclusive, got: %s", got)
+	}
+}
+
+func TestLoad_RouteWithNeitherUpstreamNorCommand(t *testing.T) {
+	yaml := `
+listen: ":8090"
+rules_dir: "./rules"
+routes:
+  - scope: test
+`
+	path := writeTempYAML(t, yaml)
+	_, err := Load(path)
+	if err == nil {
+		t.Fatal("expected error for route with neither upstream nor command, got nil")
 	}
 }
 
