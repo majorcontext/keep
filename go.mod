@@ -1,6 +1,6 @@
 module github.com/majorcontext/keep
 
-go 1.25.6
+go 1.25
 
 require (
 	github.com/google/cel-go v0.27.0

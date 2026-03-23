@@ -35,17 +35,16 @@ cmd/
   keep-mcp-relay/      MCP relay binary
   keep-llm-gateway/    LLM gateway binary
 internal/
-  engine/              Core policy engine (rule loading, evaluation, expression environment)
+  engine/              Core policy engine (evaluation, decision logic)
   cel/                 CEL expression compilation and evaluation
-  rule/                Rule file parsing, validation, scope indexing
-  profile/             Profile loading and alias resolution
-  pack/                Starter pack loading and override merging
+  config/              Rule parsing/validation, profiles, starter packs, scope indexing
   rate/                Local counter store for rateCount()
   audit/               Structured audit logging
-  config/              Integration config parsing (relay, gateway)
   relay/               MCP relay transport (upstream routing, MCP protocol)
   gateway/             LLM gateway transport (block decomposition, payload reassembly)
   redact/              Redaction pattern matching and field mutation
+  secrets/             Secret detection based on gitleaks patterns
+  sse/                 SSE reader/writer used by streaming proxy
 ```
 
 ### Key Flows
@@ -92,15 +91,15 @@ Keep uses CEL with custom functions:
 
 ### MCP relay with Linear
 
-See `demo/` for a working relay example with SQLite.
+See `examples/mcp-relay-demo/` for a working relay example with SQLite.
 
 ### LLM gateway with Anthropic
 
-See `demo/` for gateway configuration examples.
+See `examples/llm-gateway-demo/` for gateway configuration examples.
 
 ### Library integration
 
-See `demo/` for library integration examples.
+See `examples/` for library integration examples.
 
 ## Code Style & Guidelines
 

@@ -15,7 +15,7 @@ Keep provides three binaries:
 
 ## Prerequisites
 
-Keep requires [Go](https://go.dev/dl/) 1.25.6 or later.
+Keep requires [Go](https://go.dev/dl/) 1.25 or later.
 
 ## Install with `go install`
 
