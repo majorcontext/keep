@@ -10,7 +10,7 @@ keep-mcp-relay --config keep-mcp-relay.yaml
 
 This starts the MCP relay with your rules loaded. Agents connect to one endpoint. Every tool call is evaluated against your policy before reaching the upstream MCP server.
 
-For design rationale and principles, see [VISION.md](VISION.md). For the full product requirements, see [docs/plans/](docs/plans/).
+For design rationale and principles, see [VISION.md](VISION.md).
 
 ## Installation
 
@@ -239,6 +239,11 @@ See the language specification in [docs/plans/2026-03-17-language-spec.md](docs/
 **LLM gateway:** Decomposes LLM message payloads into per-content-block calls. `llm.tool_result`, `llm.tool_use`, `llm.request`, `llm.response` -- each evaluated as a flat call. Bidirectional: filters both what the model sees and what the model wants to do.
 
 **Audit logging:** Every evaluation produces a structured JSON log entry -- timestamp, scope, operation, agent identity, rules evaluated, decision.
+
+## Documentation
+
+- [Language specification](docs/plans/2026-03-17-language-spec.md) — Rule file format, expression language, integration config reference
+- [VISION.md](VISION.md) — Design rationale and principles
 
 ## Contributing
 
