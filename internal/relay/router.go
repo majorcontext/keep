@@ -12,7 +12,7 @@ import (
 
 // ToolRoute maps a tool to its upstream client and scope.
 type ToolRoute struct {
-	Client *mcp.Client
+	Client mcp.ToolCaller
 	Scope  string
 	Tool   mcp.Tool
 }
@@ -37,30 +37,48 @@ func NewRouter(ctx context.Context, routes []relayconfig.Route) (*Router, error)
 			}
 		}
 
-		// Build client options from auth config
-		var opts []mcp.ClientOption
-		if route.Auth != nil {
-			switch route.Auth.Type {
-			case "bearer":
-				opts = append(opts, mcp.WithBearerToken(route.Auth.TokenEnv))
-			case "header":
-				opts = append(opts, mcp.WithHeader(route.Auth.Header, route.Auth.TokenEnv))
+		// Create the appropriate client type
+		var client mcp.ToolCaller
+		if route.Command != "" {
+			stdioClient, err := mcp.NewStdioClient(route.Command, route.Args...)
+			if err != nil {
+				log.Printf("relay: stdio upstream %q failed to start: %v (skipping)", route.Command, err)
+				continue
 			}
+			client = stdioClient
+		} else {
+			// Build client options from auth config
+			var opts []mcp.ClientOption
+			if route.Auth != nil {
+				switch route.Auth.Type {
+				case "bearer":
+					opts = append(opts, mcp.WithBearerToken(route.Auth.TokenEnv))
+				case "header":
+					opts = append(opts, mcp.WithHeader(route.Auth.Header, route.Auth.TokenEnv))
+				}
+			}
+			client = mcp.NewClient(route.Upstream, opts...)
 		}
-
-		client := mcp.NewClient(route.Upstream, opts...)
 
 		// Initialize
 		_, err := client.Initialize(ctx)
 		if err != nil {
-			log.Printf("relay: upstream %q unreachable: %v (skipping)", route.Upstream, err)
+			upstreamLabel := route.Upstream
+			if route.Command != "" {
+				upstreamLabel = route.Command
+			}
+			log.Printf("relay: upstream %q unreachable: %v (skipping)", upstreamLabel, err)
 			continue
 		}
 
 		// Discover tools
 		tools, err := client.ListTools(ctx)
 		if err != nil {
-			log.Printf("relay: upstream %q tool discovery failed: %v (skipping)", route.Upstream, err)
+			upstreamLabel := route.Upstream
+			if route.Command != "" {
+				upstreamLabel = route.Command
+			}
+			log.Printf("relay: upstream %q tool discovery failed: %v (skipping)", upstreamLabel, err)
 			continue
 		}
 

@@ -18,10 +18,13 @@ type RelayConfig struct {
 }
 
 // Route maps a scope to an upstream MCP endpoint with optional auth.
+// Exactly one of Upstream or Command must be set.
 type Route struct {
-	Scope    string `yaml:"scope"`
-	Upstream string `yaml:"upstream"`
-	Auth     *Auth  `yaml:"auth,omitempty"`
+	Scope    string   `yaml:"scope"`
+	Upstream string   `yaml:"upstream,omitempty"`
+	Command  string   `yaml:"command,omitempty"`
+	Args     []string `yaml:"args,omitempty"`
+	Auth     *Auth    `yaml:"auth,omitempty"`
 }
 
 // Auth describes how to authenticate requests to an upstream.
@@ -71,8 +74,11 @@ func (c *RelayConfig) validate() error {
 		if r.Scope == "" {
 			return fmt.Errorf("relay config: routes[%d]: scope is required", i)
 		}
-		if r.Upstream == "" {
-			return fmt.Errorf("relay config: routes[%d]: upstream is required", i)
+		if r.Upstream == "" && r.Command == "" {
+			return fmt.Errorf("relay config: routes[%d]: either upstream or command is required", i)
+		}
+		if r.Upstream != "" && r.Command != "" {
+			return fmt.Errorf("relay config: routes[%d]: upstream and command are mutually exclusive", i)
 		}
 	}
 	return nil
