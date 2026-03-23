@@ -42,6 +42,8 @@ make test-unit ARGS='-run TestName ./internal/engine'
 - Error messages should be actionable -- tell users exactly what to do
 - Documentation must match actual behavior
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture, testing, and development details.
+
 ## Superpowers Overrides
 
 - Save specs and plans to `docs/plans/` (not `docs/superpowers/`)
