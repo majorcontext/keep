@@ -26,7 +26,7 @@ Keep is the policy engine. It doesn't own transport, credentials, or sandboxing.
 
 - **Moat** handles network-level isolation and credential injection.
 - **Keep** handles operation-level policy on structured calls.
-- **agentsh** (or similar) handles syscall-level enforcement.
+- A syscall-level tool handles process-level enforcement.
 
 Each layer has a clear boundary. Keep composes with Moat as a sidecar, but runs independently too.
 

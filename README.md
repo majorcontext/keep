@@ -108,6 +108,9 @@ routes:
     upstream: "https://mcp.linear.app/mcp"
   - scope: slack-tools
     upstream: "https://slack-mcp-server.example.com"
+  - scope: local-tools
+    command: "npx"
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
 ```
 
 ### `keep-llm-gateway` -- LLM provider proxy with policy
@@ -232,7 +235,7 @@ See the language specification in [docs/plans/2026-03-17-language-spec.md](docs/
 
 **Policy engine:** Loads YAML rule files, indexes by scope. Each call is matched against operation globs and CEL expressions. Returns allow, deny, or redact.
 
-**Expression language:** CEL (Common Expression Language) -- non-Turing-complete, linear-time evaluation, no side effects. Supports field access, string matching, collection operators, temporal predicates, rate limiting, and content pattern detection.
+**Expression language:** CEL (Common Expression Language) -- non-Turing-complete, linear-time evaluation, no side effects (except rateCount counters). Supports field access, string matching, collection operators, temporal predicates, rate limiting, and content pattern detection.
 
 **MCP relay:** Accepts MCP connections from agents, proxies to upstream MCP servers. One tool call = one Keep call. Deny returns an MCP error. Redact mutates tool input before forwarding.
 

@@ -39,6 +39,12 @@ echo -e "${DIM}Policy enforcement for MCP tool calls${RESET}"
 echo ""
 
 # ── Prerequisites ────────────────────────────────────────────────
+if ! command -v go &>/dev/null; then
+  echo -e "${RED}Error:${RESET} go is required but not found."
+  echo "  Install it from: https://go.dev/dl/"
+  exit 1
+fi
+
 if ! command -v sqlite3 &>/dev/null; then
   echo -e "${RED}Error:${RESET} sqlite3 is required but not found."
   echo "  Install it with: brew install sqlite3  (macOS) or apt install sqlite3  (Linux)"

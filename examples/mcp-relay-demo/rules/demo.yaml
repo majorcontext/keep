@@ -9,7 +9,9 @@ rules:
     action: deny
     message: "Database is read-only. Write operations are not permitted."
 
-  # Redact plaintext passwords from query results
+  # Redact plaintext passwords from query results.
+  # NOTE: This rule uses hardcoded demo passwords. In production, use
+  # secrets: true to leverage gitleaks-based detection (~160 patterns).
   - name: redact-passwords
     match:
       operation: "read_query"

@@ -236,7 +236,7 @@ patterns:
   - match: "(?i)(password|secret|api_key|token)\\s*[=:]\\s*\\S+"
     replace: "[REDACTED:SECRET]"
 
-  - match: "-----BEGIN (RSA |EC )?PRIVATE KEY-----[\\s\\S]*?-----END \\1PRIVATE KEY-----"
+  - match: "-----BEGIN (RSA |EC )?PRIVATE KEY-----[\\s\\S]*?-----END (RSA |EC )?PRIVATE KEY-----"
     replace: "[REDACTED:PRIVATE_KEY]"
 ```
 
@@ -455,21 +455,10 @@ list.map(x, transform)             // returns transformed elements
 list.exists_one(x, predicate)      // true if exactly one element matches
 ```
 
-Keep provides `any()` and `all()` as aliases for `exists()` and `all()`:
-
-```cel
-// these are equivalent:
-params.to.exists(addr, addr.endsWith("@company.com"))
-params.to.any(addr, addr.endsWith("@company.com"))
-
-// these are equivalent:
-params.to.all(addr, addr.endsWith("@company.com"))
-```
-
 Examples:
 
 ```cel
-params.to.any(addr, addr.endsWith("@competitor.com"))
+params.to.exists(addr, addr.endsWith("@competitor.com"))
 params.labels.all(l, l != "secret")
 size(params.to) + size(params.cc) > 10
 ```
@@ -836,7 +825,7 @@ rules:
           replace: "[REDACTED:AWS_KEY]"
         - match: "(?i)(password|secret|api_key|token)\\s*[=:]\\s*\\S+"
           replace: "[REDACTED:SECRET]"
-        - match: "-----BEGIN (RSA |EC )?PRIVATE KEY-----[\\s\\S]*?-----END \\1PRIVATE KEY-----"
+        - match: "-----BEGIN (RSA |EC )?PRIVATE KEY-----[\\s\\S]*?-----END (RSA |EC )?PRIVATE KEY-----"
           replace: "[REDACTED:PRIVATE_KEY]"
 
   # PHI detection is not handled by a built-in function. For structured PHI
