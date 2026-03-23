@@ -106,7 +106,7 @@ Every rule has one action: deny, redact, or log.
 | `redact` | No | Yes | Yes |
 | `log` | No | No | Yes |
 
-Rules are evaluated in order. The first deny stops evaluation immediately. All matching redact and log rules are applied.
+Rules are sorted by operation specificity -- exact matches evaluate before glob patterns, which evaluate before catch-all rules. Within the same specificity tier, rules preserve their file order. The first deny short-circuits evaluation immediately. All matching redact and log rules are applied.
 
 ### Deny
 
@@ -259,7 +259,7 @@ Def values are raw strings substituted before compilation. Each value must be a 
 
 ```yaml
 defs:
-  email_pattern: "'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\\\.[a-zA-Z]{2,}'"
+  email_pattern: "'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}'"
 
 rules:
   - name: block-pii-in-prompts
@@ -267,7 +267,7 @@ rules:
       operation: "llm.text"
       when: >
         context.direction == 'request'
-        && matches(params.text, email_pattern)
+        && params.text.matches(email_pattern)
     action: deny
     message: "PII detected in prompt. Use opaque customer IDs instead."
 ```
@@ -335,7 +335,7 @@ tests:
 ### Run tests
 
 ```bash
-$ keep test ./rules ./fixtures
+$ keep test ./rules --fixtures ./fixtures
 ```
 
 This evaluates each fixture call against the rules and reports pass/fail for every test case. Use `keep test` in CI to catch policy regressions before deployment.

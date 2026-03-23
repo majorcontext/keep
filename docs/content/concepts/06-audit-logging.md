@@ -86,7 +86,7 @@ When a scope is configured with `mode: audit_only`, the engine evaluates all rul
 In audit-only mode:
 
 - All rules are evaluated, even after a deny match. In enforce mode, a deny short-circuits evaluation. In audit-only mode, the engine continues through all rules so the `RulesEvaluated` array is complete.
-- Redact mutations are computed but not applied. The `Decision` field shows `redact`, but `Enforced` is `false` and the call parameters are not modified.
+- Redact rules are skipped entirely -- mutations are neither computed nor applied. The `Decision` field shows `redact` only if a deny rule also matched, but `Enforced` is `false` and the call parameters are not modified.
 - CEL evaluation errors are treated as non-matches rather than triggering fail-closed behavior.
 
 > **Note:** CEL functions with side effects still execute in audit-only mode. `rateCount()` increments counters even when the decision is not enforced. This is a known limitation.
@@ -101,5 +101,5 @@ In audit-only mode:
 
 ## Related concepts
 
-- [Rules and scopes](./04-rules-and-scopes.md) -- how rules are organized and evaluated
-- [Redaction](./05-redaction.md) -- how field-level redaction works
+- [Rules and scopes](./03-scopes.md) -- how rules are organized and evaluated
+- [Redaction](./04-redaction.md) -- how field-level redaction works

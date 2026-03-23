@@ -95,7 +95,7 @@ scope: my-scope
 mode: audit_only
 ```
 
-When unset, mode defaults to `audit_only`. Use the `--enforce` flag or the `WithForceEnforce` option to override all scopes to enforce mode.
+When unset, mode defaults to `audit_only`. The `keep test` command forces enforce mode via the `WithForceEnforce()` Go option to override all scopes during testing.
 
 ## What the caller receives
 

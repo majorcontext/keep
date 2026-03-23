@@ -9,8 +9,8 @@ This guide walks through embedding Keep's policy engine in a Go application. By 
 
 ## Prerequisites
 
-- Go 1.22 or later
-- A directory of Keep rule files (see [Writing rules](../getting-started/03-writing-rules.md))
+- Go 1.25 or later
+- A directory of Keep rule files (see [Writing rules](./03-writing-rules.md))
 
 ## Install
 
@@ -191,5 +191,5 @@ func policyMiddleware(eng *keep.Engine, scope string, next http.Handler) http.Ha
 
 ## Related guides
 
-- [Writing rules](../getting-started/03-writing-rules.md) -- rule file syntax and structure
+- [Writing rules](./03-writing-rules.md) -- rule file syntax and structure
 - [Expressions](../concepts/02-expressions.md) -- CEL expression reference

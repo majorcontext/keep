@@ -57,7 +57,9 @@ This places binaries in your `$GOBIN` directory (defaults to `$HOME/go/bin`). En
 ```bash
 $ keep version
 
-keep version dev (abc1234) built 2026-03-23T00:00:00Z
+version: dev
+commit:  abc1234
+date:    2026-03-23T00:00:00Z
 ```
 
 The exact output varies depending on how the binary was built. If `keep version` prints version information, the installation is working.

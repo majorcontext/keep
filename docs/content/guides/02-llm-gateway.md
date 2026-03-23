@@ -59,7 +59,7 @@ scope: my-gateway
 mode: enforce
 
 defs:
-  email_pattern: "'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\\\.[a-zA-Z]{2,}'"
+  email_pattern: "'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}'"
 
 rules:
   # Redact secrets (API keys, tokens) from tool results
@@ -78,7 +78,7 @@ rules:
       operation: "llm.text"
       when: >
         context.direction == 'request'
-        && matches(params.text, email_pattern)
+        && params.text.matches(email_pattern)
     action: deny
     message: "PII detected. Use opaque identifiers instead of email addresses."
 

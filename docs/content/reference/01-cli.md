@@ -11,7 +11,7 @@ Keep ships three binaries: `keep` (rule authoring), `keep-mcp-relay` (MCP proxy)
 
 ## keep
 
-```
+```text
 keep <command> [flags]
 ```
 
@@ -19,7 +19,7 @@ keep <command> [flags]
 
 Validate rule files, profiles, and starter packs. Loads and compiles all rules, reporting any errors.
 
-```
+```text
 keep validate <rules-dir> [flags]
 ```
 
@@ -41,7 +41,7 @@ OK (2 scopes, linear-tools, anthropic-gateway: 0 errors)
 
 Test rules against fixture files. All scopes are evaluated in enforce mode regardless of their configured mode, so `audit_only` rules fire as if enforced.
 
-```
+```text
 keep test <rules-dir> --fixtures <path> [flags]
 ```
 
@@ -55,7 +55,7 @@ Each test case compares the engine's decision, rule name, message, and mutations
 
 **Output format:**
 
-```
+```text
 <fixture-file>:
   PASS  <test-name>
   FAIL  <test-name>
@@ -82,13 +82,13 @@ linear.yaml:
 
 Print build information.
 
-```
+```text
 keep version
 ```
 
 **Output format:**
 
-```
+```text
 version: <version>
 commit:  <commit>
 date:    <date>
@@ -98,7 +98,7 @@ date:    <date>
 
 MCP (Model Context Protocol) relay proxy. Sits between an MCP client and one or more upstream MCP servers, evaluating every tool call against Keep rules.
 
-```
+```text
 keep-mcp-relay --config <path>
 ```
 
@@ -106,7 +106,7 @@ keep-mcp-relay --config <path>
 |------|------|---------|----------|-------------|
 | `--config` | `string` | `""` | Yes | Path to relay config file |
 
-The config file specifies `rules_dir`, `listen` address, upstream `routes`, and logging options. See [MCP relay guide](../guides/01-mcp-relay.md) for config file format.
+The config file specifies `rules_dir`, `listen` address, upstream `routes`, and logging options. See [relay config reference](04-relay-config.md) for config file format.
 
 **Signals:**
 
@@ -121,7 +121,7 @@ The config file specifies `rules_dir`, `listen` address, upstream `routes`, and 
 
 HTTP reverse proxy for LLM provider APIs. Intercepts tool-use requests in the LLM response stream and evaluates them against Keep rules before the agent acts.
 
-```
+```text
 keep-llm-gateway --config <path>
 ```
 
@@ -129,7 +129,7 @@ keep-llm-gateway --config <path>
 |------|------|---------|----------|-------------|
 | `--config` | `string` | `""` | Yes | Path to gateway config file |
 
-The config file specifies `rules_dir`, `listen` address, LLM `provider`, `scope`, and logging options. See [MCP relay guide](../guides/01-mcp-relay.md) for a similar config structure.
+The config file specifies `rules_dir`, `listen` address, LLM `provider`, `scope`, and logging options. See [gateway config reference](05-gateway-config.md) and the [LLM gateway guide](../guides/02-llm-gateway.md) for config details.
 
 **Environment variables:**
 

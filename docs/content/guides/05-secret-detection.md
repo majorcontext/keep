@@ -54,7 +54,7 @@ rules:
       target: "params.content"
       secrets: true
       patterns:
-        - regex: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
+        - match: "[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}"
           replace: "[REDACTED:email]"
 ```
 
@@ -105,14 +105,28 @@ rules:
 
 ## Verify it works
 
-Test the rules with `keep evaluate` and a call that contains a known secret format:
+Test secret detection by writing a fixture that sends a known secret and expects redaction:
 
-```bash
-$ keep evaluate --rules ./rules --operation llm.tool_result \
-    --params '{"content": "key is AKIAIOSFODNN7REALKEY"}'
+```yaml
+# fixtures/secret-test.yaml
+scope: my-gateway
+tests:
+  - name: "redacts AWS key in tool result"
+    call:
+      operation: "llm.tool_result"
+      params:
+        content: "key is AKIAIOSFODNN7REALKEY"
+    expect:
+      decision: "redact"
 ```
 
-The output should show the redact action firing, with the AWS key replaced by `[REDACTED:aws-access-token]`.
+Run the fixture with `keep test`:
+
+```bash
+$ keep test ./rules --fixtures ./fixtures/secret-test.yaml
+```
+
+The test passes when the redact action fires, replacing the AWS key with `[REDACTED:aws-access-token]`.
 
 ## Limitations
 

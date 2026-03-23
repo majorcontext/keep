@@ -9,7 +9,7 @@ keywords: ["keep", "cel", "expressions", "policy language", "custom functions"]
 
 Keep uses CEL (Common Expression Language) for the `when` field in rules. CEL is a non-Turing-complete expression language designed by Google for exactly this kind of use case -- evaluating policy predicates in environments where safety and performance are non-negotiable.
 
-CEL has no loops, no variable assignment, no unbounded recursion, and no side effects. Every expression evaluates in bounded time proportional to the size of its input. It is statically typed, catching errors at compile time rather than at request time.
+CEL has no loops, no variable assignment, no unbounded recursion, and no side effects. Every expression evaluates in bounded time proportional to the size of its input. It is statically typed, catching errors at compile time rather than at call evaluation time.
 
 This matters for a policy engine. Rules run on every API call. An expression that allocates unbounded memory or enters an infinite loop is a denial-of-service vulnerability in your own infrastructure. CEL eliminates that class of problem by construction -- the language itself makes it impossible to write an expression that does not terminate.
 
@@ -74,7 +74,7 @@ Counters are local to the process and held in memory. Multiple relay or gateway 
 
 `containsAny` checks whether a string contains any term from a list, case-insensitively. It is a convenience over writing multiple `.contains()` calls chained with `||`.
 
-`estimateTokens` returns a rough token count by dividing the byte length by four. This is an approximation, not a tokenizer -- it is fast enough to run on every call and accurate enough for threshold-based policies like "flag responses over 10,000 tokens."
+`estimateTokens` returns a rough token count by dividing the character count (Unicode rune count) by four. This is an approximation, not a tokenizer -- it is fast enough to run on every call and accurate enough for threshold-based policies like "flag responses over 10,000 tokens."
 
 `hasSecrets` runs gitleaks pattern detection against a string and returns true if it finds credentials, API keys, or other secret material. Use it to prevent agents from leaking secrets in generated content or tool call parameters.
 
@@ -133,12 +133,11 @@ The restrictions in CEL are not limitations to work around. They are the reason 
 
 A policy engine that accepts arbitrary code requires sandboxing, resource limits, timeouts, and monitoring to prevent a single bad expression from affecting all traffic. CEL avoids this by making dangerous expressions impossible to write. There are no loops to run forever, no allocations to exhaust memory, no network calls to hang on.
 
-The result: every `when` expression compiles once at load time and evaluates in microseconds at request time. There is no review process to decide which expressions are "safe enough" to deploy. There is no timeout configuration to tune. The language guarantees safety for all valid programs.
+The result: every `when` expression compiles once at load time and evaluates in microseconds at call evaluation time. There is no review process to decide which expressions are "safe enough" to deploy. There is no timeout configuration to tune. The language guarantees safety for all valid programs.
 
 This trade-off -- giving up general computation in exchange for guaranteed termination -- is what makes it practical to evaluate policy on every API call without performance concerns or operational risk. If you find yourself needing a feature that CEL does not support, that is usually a signal that the logic belongs outside the expression layer -- in a custom function, in the calling application, or in a separate service.
 
 ## Related concepts
 
-- **Rules and scopes** -- how expressions fit into the broader rule evaluation model, including match semantics and rule ordering
-- **Actions** -- what happens after an expression matches: deny, redact, and log each produce different outcomes
-- **Profiles** -- how field aliases map short names to `params.*` paths, complementing defs with transport-aware field mapping
+- [Calls and evaluation](01-calls-and-evaluation.md) -- how expressions fit into the broader rule evaluation model, including match semantics, rule ordering, and actions (deny, redact, log)
+- [Scopes](03-scopes.md) -- how rules are organized into scopes, including profiles that map short names to `params.*` paths

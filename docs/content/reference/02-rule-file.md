@@ -78,7 +78,7 @@ Named string constants substituted into CEL `when` expressions before compilatio
 | Constraint | Value |
 |------------|-------|
 | Pattern | `[a-z][a-z0-9_]*` |
-| Max length | 32 characters |
+| Max length | 64 characters |
 | Value max length | 2048 characters |
 | Value | Must not be empty |
 
@@ -109,7 +109,7 @@ You cannot override `name` or `operation`. Use a new inline rule instead.
 | Rule name pattern | `[a-z][a-z0-9-]*` |
 | Rule name max length | 64 characters |
 | Def name pattern | `[a-z][a-z0-9_]*` |
-| Def name max length | 32 characters |
+| Def name max length | 64 characters |
 | Max rules per scope | 500 |
 | Max patterns per redact block | 50 |
 | Max `when` expression length | 2048 characters |

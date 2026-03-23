@@ -116,5 +116,5 @@ All three calls are evaluated against the rules in `./rules`. The two deny cases
 
 You have rules that validate and pass tests. To enforce them at runtime:
 
-- [Run the MCP relay](../guides/mcp-relay.md) -- proxy MCP tool calls through Keep so agents hit your policy before reaching upstream servers
-- [Run the LLM gateway](../guides/llm-gateway.md) -- sit between your agent and the LLM provider to filter both requests and responses
+- [Run the MCP relay](../guides/01-mcp-relay.md) -- proxy MCP tool calls through Keep so agents hit your policy before reaching upstream servers
+- [Run the LLM gateway](../guides/02-llm-gateway.md) -- sit between your agent and the LLM provider to filter both requests and responses

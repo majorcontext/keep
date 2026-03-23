@@ -126,7 +126,7 @@ rules:
     action: log
 ```
 
-Rules evaluate in order. The first rule that matches determines the decision:
+Rules are sorted by operation specificity -- exact matches (e.g. `delete_issue`) evaluate before glob patterns (e.g. `*`), which evaluate before catch-all rules. Within the same specificity tier, rules preserve their file order. A **deny** short-circuits evaluation immediately. All matching **redact** and **log** rules are applied:
 
 - **deny** -- the call is blocked and the agent receives a structured error containing the rule name and message
 - **redact** -- specified fields are mutated before the call is forwarded (on requests) or before the response is returned to the agent (on responses)

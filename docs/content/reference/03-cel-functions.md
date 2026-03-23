@@ -38,7 +38,7 @@ Missing field accesses on `params` or `context` evaluate to `false` rather than 
 
 ### `inTimeWindow`
 
-```
+```text
 inTimeWindow(now, start, end, tz) -> bool
 ```
 
@@ -61,7 +61,7 @@ inTimeWindow(now, "09:00", "17:00", "America/New_York")
 
 ### `dayOfWeek`
 
-```
+```text
 dayOfWeek(now) -> string
 dayOfWeek(now, tz) -> string
 ```
@@ -87,7 +87,7 @@ dayOfWeek(now, "Asia/Tokyo") == "monday"
 
 ### `rateCount`
 
-```
+```text
 rateCount(key, window) -> int
 ```
 
@@ -110,7 +110,7 @@ rateCount(context.agent_id + ":create_issue", "1h") > 100
 
 ### `containsAny`
 
-```
+```text
 containsAny(field, terms) -> bool
 ```
 
@@ -129,11 +129,11 @@ containsAny(params.body, ["password", "secret", "api_key"])
 
 ### `estimateTokens`
 
-```
+```text
 estimateTokens(field) -> int
 ```
 
-Returns a rough token count for `field`, calculated as `len(field) / 4`.
+Returns a rough token count for `field`, calculated as the character (rune) count of `field` divided by 4.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
@@ -145,13 +145,13 @@ Returns a rough token count for `field`, calculated as `len(field) / 4`.
 estimateTokens(params.prompt) > 10000
 ```
 
-> **Note:** This is a byte-length heuristic, not a tokenizer. Actual token counts vary by model.
+> **Note:** This is a character-count heuristic, not a tokenizer. Actual token counts vary by model.
 
 ## String manipulation
 
 ### `lower`
 
-```
+```text
 lower(field) -> string
 ```
 
@@ -165,7 +165,7 @@ lower(params.status) == "urgent"
 
 ### `upper`
 
-```
+```text
 upper(field) -> string
 ```
 
@@ -179,7 +179,7 @@ upper(params.priority_label) == "P0"
 
 ### `matchesDomain`
 
-```
+```text
 matchesDomain(email, domains) -> bool
 ```
 
@@ -193,7 +193,7 @@ Returns `true` if the domain part of `email` matches any entry in `domains`. Sub
 **Example:**
 
 ```cel
-matchesDomain(context.user_email, ["example.com", "example.org"])
+matchesDomain(context.user_id, ["example.com", "example.org"])
 ```
 
 > **Note:** Returns `false` if `email` does not contain an `@` character. Comparison is case-insensitive.
@@ -202,7 +202,7 @@ matchesDomain(context.user_email, ["example.com", "example.org"])
 
 ### `hasSecrets`
 
-```
+```text
 hasSecrets(field) -> bool
 ```
 

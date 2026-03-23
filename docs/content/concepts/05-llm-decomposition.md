@@ -88,7 +88,7 @@ Request calls carry `context.direction: "request"`. Response calls carry `contex
     when: 'context.direction == "request" && params.text.matches("\\d{3}-\\d{2}-\\d{4}")'
   action: redact
   redact:
-    fields: ["params.text"]
+    target: "params.text"
 
 # Block the model from calling dangerous tools
 - name: no-delete-tools
@@ -147,5 +147,5 @@ Disabling a block type means no calls are emitted for that type and no rules can
 ## Related concepts
 
 - [Introduction](../getting-started/01-introduction.md) -- overview of Keep's core model and deployment modes
-- [Rules](./01-rules.md) -- rule structure, match conditions, and actions
+- [Rules](./01-calls-and-evaluation.md) -- rule structure, match conditions, and actions
 - [Expressions](./02-expressions.md) -- CEL expression syntax for `when` conditions

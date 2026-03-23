@@ -115,6 +115,6 @@ The deep copy is recursive -- nested maps within params are copied at every leve
 
 ## Related concepts
 
-- [Evaluation](03-evaluation.md) -- how the engine processes rules, orders actions, and produces decisions
+- [Evaluation](01-calls-and-evaluation.md) -- how the engine processes rules, orders actions, and produces decisions
 - [Expressions](02-expressions.md) -- CEL expressions used in rule match conditions, including `when` clauses on redact rules
-- [Scopes and rules](01-scopes-and-rules.md) -- how rules are organized into scopes and how rule ordering affects evaluation
+- [Scopes](03-scopes.md) -- how rules are organized into scopes and how rule ordering affects evaluation
