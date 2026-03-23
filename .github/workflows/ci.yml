@@ -37,6 +37,14 @@ jobs:
         with:
           version: v2.8.0
 
+      - name: Lint YAML
+        run: |
+          if command -v yamlfmt &> /dev/null; then
+            yamlfmt -lint .
+          else
+            echo "yamlfmt not installed, skipping YAML lint"
+          fi
+
   test:
     name: Test
     runs-on: ubuntu-latest

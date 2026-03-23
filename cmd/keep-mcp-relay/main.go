@@ -68,7 +68,7 @@ func main() {
 	}
 
 	// 5. Create handler and MCP server
-	handler := relay.NewRelayHandler(engine, router, logger)
+	handler := relay.NewRelayHandler(engine, router, logger, "")
 	server := mcp.NewServer(router.Tools(), handler)
 
 	// 6. Start HTTP server

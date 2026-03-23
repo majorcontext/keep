@@ -115,7 +115,7 @@ func setupTest(t *testing.T) (*RelayHandler, *bytes.Buffer) {
 	logger := audit.NewLogger(&buf)
 
 	// 5. Create RelayHandler.
-	handler := NewRelayHandler(engine, router, logger)
+	handler := NewRelayHandler(engine, router, logger, "")
 
 	return handler, &buf
 }
@@ -232,7 +232,7 @@ func TestHandler_UpstreamError(t *testing.T) {
 		t.Fatalf("NewRouter: %v", err)
 	}
 
-	handler := NewRelayHandler(engine, router, nil)
+	handler := NewRelayHandler(engine, router, nil, "")
 
 	result, err := handler.HandleToolCall(context.Background(), "allowed_tool", map[string]any{})
 	if err == nil {
@@ -306,7 +306,7 @@ func TestHandler_ResponseRedact(t *testing.T) {
 
 	var buf bytes.Buffer
 	logger := audit.NewLogger(&buf)
-	handler := NewRelayHandler(engine, router, logger)
+	handler := NewRelayHandler(engine, router, logger, "")
 
 	result, err := handler.HandleToolCall(context.Background(), "read_query", map[string]any{"sql": "SELECT * FROM users"})
 	if err != nil {
@@ -353,7 +353,7 @@ func TestHandler_ResponseDeny(t *testing.T) {
 		t.Fatalf("NewRouter: %v", err)
 	}
 
-	handler := NewRelayHandler(engine, router, nil)
+	handler := NewRelayHandler(engine, router, nil, "")
 
 	result, err := handler.HandleToolCall(context.Background(), "write_query", map[string]any{"sql": "DROP TABLE users"})
 	if err == nil {

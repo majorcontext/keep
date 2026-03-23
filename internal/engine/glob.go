@@ -10,6 +10,11 @@ func GlobMatch(pattern, name string) bool {
 	if pattern == "" {
 		return true
 	}
-	matched, _ := path.Match(pattern, name)
+	matched, err := path.Match(pattern, name)
+	if err != nil {
+		// Pattern is malformed. This should not happen since patterns are
+		// validated at config load time. Treat as no-match.
+		return false
+	}
 	return matched
 }

@@ -88,7 +88,7 @@ func TestRelayIntegration(t *testing.T) {
 	logger := audit.NewLogger(&auditBuf)
 
 	// 5. Create RelayHandler.
-	handler := relay.NewRelayHandler(engine, router, logger)
+	handler := relay.NewRelayHandler(engine, router, logger, "")
 
 	// 6. Create MCP server with merged tools and handler.
 	relayServer := mcp.NewServer(router.Tools(), handler)

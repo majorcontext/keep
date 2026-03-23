@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"gopkg.in/yaml.v3"
+
+	keepconfig "github.com/majorcontext/keep/internal/config"
 )
 
 // GatewayConfig holds the top-level gateway configuration.
@@ -17,7 +19,7 @@ type GatewayConfig struct {
 	Upstream    string          `yaml:"upstream"`
 	Scope       string          `yaml:"scope"`
 	Decompose   DecomposeConfig `yaml:"decompose,omitempty"`
-	Log         LogConfig       `yaml:"log,omitempty"`
+	Log         keepconfig.LogConfig `yaml:"log,omitempty"`
 }
 
 // DecomposeConfig controls which message parts are decomposed into separate spans.
@@ -46,12 +48,6 @@ func (d DecomposeConfig) RequestSummaryEnabled() bool {
 // ResponseSummaryEnabled returns whether response_summary decomposition is enabled (default: true).
 func (d DecomposeConfig) ResponseSummaryEnabled() bool {
 	return d.ResponseSummary == nil || *d.ResponseSummary
-}
-
-// LogConfig controls log format and output destination.
-type LogConfig struct {
-	Format string `yaml:"format,omitempty"`
-	Output string `yaml:"output,omitempty"`
 }
 
 // validProviders is the set of accepted provider names.

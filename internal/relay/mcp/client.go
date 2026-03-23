@@ -26,6 +26,9 @@ type ClientOption func(*Client)
 // WithBearerToken returns a ClientOption that reads a bearer token from the
 // given environment variable at call time and adds it as an Authorization
 // header.
+//
+// Note: Only the last auth option takes effect. WithBearerToken and
+// WithHeader both set the auth function; later calls override earlier ones.
 func WithBearerToken(envVar string) ClientOption {
 	return func(c *Client) {
 		c.authFn = func(r *http.Request) {
@@ -39,6 +42,9 @@ func WithBearerToken(envVar string) ClientOption {
 
 // WithHeader returns a ClientOption that reads a value from the given
 // environment variable at call time and sets it as a custom request header.
+//
+// Note: Only the last auth option takes effect. WithHeader and
+// WithBearerToken both set the auth function; later calls override earlier ones.
 func WithHeader(headerName, envVar string) ClientOption {
 	return func(c *Client) {
 		c.authFn = func(r *http.Request) {

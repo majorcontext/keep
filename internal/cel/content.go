@@ -3,6 +3,7 @@ package cel
 
 import (
 	"strings"
+	"unicode/utf8"
 )
 
 // ContainsAnyFunc returns true if field contains any of the terms (case-insensitive).
@@ -16,7 +17,7 @@ func ContainsAnyFunc(field string, terms []string) bool {
 	return false
 }
 
-// EstimateTokensFunc returns a rough token count (len/4).
+// EstimateTokensFunc returns a rough token count (chars/4).
 func EstimateTokensFunc(field string) int {
-	return len(field) / 4
+	return utf8.RuneCountInString(field) / 4
 }

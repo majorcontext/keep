@@ -13,14 +13,18 @@ import (
 
 // RelayHandler bridges MCP tool calls to Keep policy evaluation.
 type RelayHandler struct {
-	engine *keep.Engine
-	router *Router
-	logger *audit.Logger
+	engine  *keep.Engine
+	router  *Router
+	logger  *audit.Logger
+	agentID string
 }
 
 // NewRelayHandler creates a handler that evaluates policy on every tool call.
-func NewRelayHandler(engine *keep.Engine, router *Router, logger *audit.Logger) *RelayHandler {
-	return &RelayHandler{engine: engine, router: router, logger: logger}
+func NewRelayHandler(engine *keep.Engine, router *Router, logger *audit.Logger, agentID string) *RelayHandler {
+	if agentID == "" {
+		agentID = "relay"
+	}
+	return &RelayHandler{engine: engine, router: router, logger: logger, agentID: agentID}
 }
 
 // HandleToolCall implements mcp.Handler.
@@ -36,7 +40,7 @@ func (h *RelayHandler) HandleToolCall(ctx context.Context, name string, args map
 		Operation: name,
 		Params:    args,
 		Context: keep.CallContext{
-			AgentID:   "relay", // TODO(m1): extract agent identity from MCP initialize clientInfo or X-Agent-ID header
+			AgentID:   h.agentID,
 			Timestamp: time.Now(),
 			Scope:     route.Scope,
 			Direction: "request",
@@ -110,7 +114,7 @@ func (h *RelayHandler) evaluateResponse(name, scope string, toolResult *mcp.Tool
 		Operation: name,
 		Params:    map[string]any{"content": joined},
 		Context: keep.CallContext{
-			AgentID:   "relay",
+			AgentID:   h.agentID,
 			Timestamp: time.Now(),
 			Scope:     scope,
 			Direction: "response",

@@ -5,6 +5,8 @@ import (
 	"os"
 
 	"gopkg.in/yaml.v3"
+
+	keepconfig "github.com/majorcontext/keep/internal/config"
 )
 
 // RelayConfig holds the top-level relay configuration.
@@ -14,7 +16,7 @@ type RelayConfig struct {
 	ProfilesDir string    `yaml:"profiles_dir,omitempty"`
 	PacksDir    string    `yaml:"packs_dir,omitempty"`
 	Routes      []Route   `yaml:"routes"`
-	Log         LogConfig `yaml:"log,omitempty"`
+	Log         keepconfig.LogConfig `yaml:"log,omitempty"`
 }
 
 // Route maps a scope to an upstream MCP endpoint with optional auth.
@@ -32,12 +34,6 @@ type Auth struct {
 	Type     string `yaml:"type"`
 	TokenEnv string `yaml:"token_env,omitempty"`
 	Header   string `yaml:"header,omitempty"`
-}
-
-// LogConfig controls log format and output destination.
-type LogConfig struct {
-	Format string `yaml:"format,omitempty"`
-	Output string `yaml:"output,omitempty"`
 }
 
 // Load reads and validates a relay config from a YAML file.
