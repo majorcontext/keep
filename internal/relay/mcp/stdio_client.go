@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -19,6 +20,7 @@ type StdioClient struct {
 	scanner *bufio.Scanner
 	mu      sync.Mutex
 	nextID  atomic.Int32
+	stderr  *bytes.Buffer
 }
 
 // NewStdioClient creates a new StdioClient that spawns the given command.
@@ -36,6 +38,9 @@ func NewStdioClient(name string, args ...string) (*StdioClient, error) {
 		return nil, fmt.Errorf("mcp: stdout pipe: %w", err)
 	}
 
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024) // 1MB buffer
 
@@ -47,17 +52,21 @@ func NewStdioClient(name string, args ...string) (*StdioClient, error) {
 		cmd:     cmd,
 		stdin:   stdin,
 		scanner: scanner,
+		stderr:  &stderr,
 	}, nil
 }
 
 // call sends a JSON-RPC request and reads the response.
+// It skips any server-initiated notifications (messages without an id field)
+// that may arrive before the actual response.
 func (c *StdioClient) call(_ context.Context, method string, params any) (*JSONRPCResponse, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	id := c.nextID.Add(1)
 	req := JSONRPCRequest{
 		JSONRPC: "2.0",
-		ID:      c.nextID.Add(1),
+		ID:      id,
 		Method:  method,
 		Params:  params,
 	}
@@ -72,23 +81,41 @@ func (c *StdioClient) call(_ context.Context, method string, params any) (*JSONR
 		return nil, fmt.Errorf("mcp: write request: %w", err)
 	}
 
-	if !c.scanner.Scan() {
-		if err := c.scanner.Err(); err != nil {
-			return nil, fmt.Errorf("mcp: read response: %w", err)
+	// Read lines until we get a response with a matching ID.
+	// MCP servers may send async notifications (no id) at any time.
+	for {
+		if !c.scanner.Scan() {
+			if err := c.scanner.Err(); err != nil {
+				return nil, fmt.Errorf("mcp: read response: %w (stderr: %s)", err, c.stderrSnippet())
+			}
+			return nil, fmt.Errorf("mcp: unexpected EOF from subprocess (stderr: %s)", c.stderrSnippet())
 		}
-		return nil, fmt.Errorf("mcp: unexpected EOF from subprocess")
-	}
 
-	var rpcResp JSONRPCResponse
-	if err := json.Unmarshal(c.scanner.Bytes(), &rpcResp); err != nil {
-		return nil, fmt.Errorf("mcp: decode response: %w", err)
-	}
+		line := c.scanner.Bytes()
 
-	if rpcResp.Error != nil {
-		return nil, fmt.Errorf("mcp: rpc error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
-	}
+		// Quick check: if the line doesn't look like JSON, skip it.
+		// Some MCP servers (via npx) may emit non-JSON output during startup.
+		if len(line) == 0 || line[0] != '{' {
+			continue
+		}
 
-	return &rpcResp, nil
+		var rpcResp JSONRPCResponse
+		if err := json.Unmarshal(line, &rpcResp); err != nil {
+			// Non-JSON line; skip.
+			continue
+		}
+
+		// Skip server-initiated notifications (no id field).
+		if rpcResp.ID == nil {
+			continue
+		}
+
+		if rpcResp.Error != nil {
+			return nil, fmt.Errorf("mcp: rpc error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
+		}
+
+		return &rpcResp, nil
+	}
 }
 
 // notify sends a JSON-RPC notification (no ID, no response expected).
@@ -183,4 +210,16 @@ func (c *StdioClient) CallTool(ctx context.Context, name string, args map[string
 func (c *StdioClient) Close() error {
 	_ = c.stdin.Close()
 	return c.cmd.Process.Kill()
+}
+
+// stderrSnippet returns the last portion of stderr output for error messages.
+func (c *StdioClient) stderrSnippet() string {
+	s := c.stderr.String()
+	if len(s) > 256 {
+		s = s[len(s)-256:]
+	}
+	if s == "" {
+		return "<empty>"
+	}
+	return s
 }

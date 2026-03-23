@@ -46,6 +46,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Notifications have no id field. Per MCP Streamable HTTP spec,
+	// respond with 202 Accepted and no body.
+	if req.ID == nil {
+		w.WriteHeader(http.StatusAccepted)
+		return
+	}
+
 	var resp JSONRPCResponse
 	resp.JSONRPC = "2.0"
 	resp.ID = req.ID
@@ -60,13 +67,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			ServerInfo: s.info,
 		}
 
-	case "notifications/initialized":
-		// Client sends this after initialize. No response needed for notifications,
-		// but since we're doing request/response, just return empty success.
-		resp.Result = map[string]any{}
-
 	case "tools/list":
-		resp.Result = ListToolsResult{Tools: s.tools}
+		tools := s.tools
+		if tools == nil {
+			tools = []Tool{}
+		}
+		resp.Result = ListToolsResult{Tools: tools}
 
 	case "tools/call":
 		// Parse params

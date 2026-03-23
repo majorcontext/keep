@@ -37,6 +37,38 @@ func TestStdioClient_InitializeAndListTools(t *testing.T) {
 	}
 }
 
+// TestStdioClient_NoisyServer verifies the client correctly handles async
+// notifications interleaved with responses (as real MCP servers often do).
+func TestStdioClient_NoisyServer(t *testing.T) {
+	client, err := NewStdioClient("go", "run", "testdata/mock_noisy_server.go")
+	if err != nil {
+		t.Fatalf("NewStdioClient: %v", err)
+	}
+	defer client.Close()
+
+	ctx := context.Background()
+
+	result, err := client.Initialize(ctx)
+	if err != nil {
+		t.Fatalf("Initialize: %v", err)
+	}
+	if result.ServerInfo.Name != "mock-noisy" {
+		t.Errorf("ServerInfo.Name = %q, want %q", result.ServerInfo.Name, "mock-noisy")
+	}
+
+	// ListTools should succeed even though the server sends a notification before the response.
+	tools, err := client.ListTools(ctx)
+	if err != nil {
+		t.Fatalf("ListTools: %v", err)
+	}
+	if len(tools) != 1 {
+		t.Fatalf("len(tools) = %d, want 1", len(tools))
+	}
+	if tools[0].Name != "read_query" {
+		t.Errorf("tools[0].Name = %q, want %q", tools[0].Name, "read_query")
+	}
+}
+
 func TestStdioClient_CallTool(t *testing.T) {
 	client, err := NewStdioClient("go", "run", "testdata/mock_stdio_server.go")
 	if err != nil {

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"time"
 
 	relayconfig "github.com/majorcontext/keep/internal/relay/config"
 	"github.com/majorcontext/keep/internal/relay/mcp"
@@ -37,47 +38,69 @@ func NewRouter(ctx context.Context, routes []relayconfig.Route) (*Router, error)
 			}
 		}
 
-		// Create the appropriate client type
-		var client mcp.ToolCaller
+		upstreamLabel := route.Upstream
 		if route.Command != "" {
-			stdioClient, err := mcp.NewStdioClient(route.Command, route.Args...)
-			if err != nil {
-				log.Printf("relay: stdio upstream %q failed to start: %v (skipping)", route.Command, err)
-				continue
-			}
-			client = stdioClient
-		} else {
-			// Build client options from auth config
-			var opts []mcp.ClientOption
-			if route.Auth != nil {
-				switch route.Auth.Type {
-				case "bearer":
-					opts = append(opts, mcp.WithBearerToken(route.Auth.TokenEnv))
-				case "header":
-					opts = append(opts, mcp.WithHeader(route.Auth.Header, route.Auth.TokenEnv))
-				}
-			}
-			client = mcp.NewClient(route.Upstream, opts...)
+			upstreamLabel = route.Command
 		}
 
-		// Initialize
-		_, err := client.Initialize(ctx)
-		if err != nil {
-			upstreamLabel := route.Upstream
+		// Create and initialize client.
+		// Stdio upstreams (e.g. npx/uvx) may need time to install packages,
+		// so retry with a fresh subprocess each attempt.
+		var client mcp.ToolCaller
+		var initErr error
+		maxAttempts := 1
+		if route.Command != "" {
+			maxAttempts = 15 // ~30s total for stdio processes (package install)
+		}
+
+		for attempt := range maxAttempts {
 			if route.Command != "" {
-				upstreamLabel = route.Command
+				stdioClient, err := mcp.NewStdioClient(route.Command, route.Args...)
+				if err != nil {
+					initErr = err
+					if attempt < maxAttempts-1 {
+						log.Printf("relay: upstream %q failed to start (attempt %d/%d): %v", upstreamLabel, attempt+1, maxAttempts, err)
+						time.Sleep(2 * time.Second)
+						continue
+					}
+					break
+				}
+				client = stdioClient
+			} else {
+				// Build client options from auth config
+				var opts []mcp.ClientOption
+				if route.Auth != nil {
+					switch route.Auth.Type {
+					case "bearer":
+						opts = append(opts, mcp.WithBearerToken(route.Auth.TokenEnv))
+					case "header":
+						opts = append(opts, mcp.WithHeader(route.Auth.Header, route.Auth.TokenEnv))
+					}
+				}
+				client = mcp.NewClient(route.Upstream, opts...)
 			}
-			log.Printf("relay: upstream %q unreachable: %v (skipping)", upstreamLabel, err)
+
+			_, initErr = client.Initialize(ctx)
+			if initErr == nil {
+				break
+			}
+			if attempt < maxAttempts-1 {
+				log.Printf("relay: upstream %q not ready (attempt %d/%d): %v", upstreamLabel, attempt+1, maxAttempts, initErr)
+				// Close the failed stdio client before retrying.
+				if closer, ok := client.(interface{ Close() error }); ok {
+					closer.Close()
+				}
+				time.Sleep(2 * time.Second)
+			}
+		}
+		if initErr != nil {
+			log.Printf("relay: upstream %q unreachable after %d attempts: %v (skipping)", upstreamLabel, maxAttempts, initErr)
 			continue
 		}
 
 		// Discover tools
 		tools, err := client.ListTools(ctx)
 		if err != nil {
-			upstreamLabel := route.Upstream
-			if route.Command != "" {
-				upstreamLabel = route.Command
-			}
 			log.Printf("relay: upstream %q tool discovery failed: %v (skipping)", upstreamLabel, err)
 			continue
 		}
