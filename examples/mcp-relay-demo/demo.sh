@@ -69,8 +69,6 @@ sed \
   "$SCRIPT_DIR/relay.yaml" > "$DEMO_DIR/relay.yaml"
 
 # ── Start relay ─────────────────────────────────────────────────
-export KEEP_DEBUG="$DEMO_DIR/debug.log"
-
 if [ -n "${KEEP_VERBOSE:-}" ]; then
   "$DEMO_DIR/keep-mcp-relay" --config "$DEMO_DIR/relay.yaml" >/dev/null &
 else
@@ -80,7 +78,7 @@ RELAY_PID=$!
 sleep 2
 
 if ! kill -0 "$RELAY_PID" 2>/dev/null; then
-  echo -e "${RED}Error:${RESET} Relay failed to start. Check debug log: $KEEP_DEBUG"
+  echo -e "${RED}Error:${RESET} Relay failed to start. Re-run with KEEP_VERBOSE=1 for details."
   exit 1
 fi
 
@@ -101,7 +99,6 @@ echo -e "  ${BLUE}2.${RESET} \"Add a new user named Test User\""
 echo -e "     ${DIM}→ write operation will be denied${RESET}"
 echo ""
 echo -e "${BOLD}Audit log:${RESET} ${DIM}$DEMO_DIR/audit.jsonl${RESET}"
-echo -e "${BOLD}Debug log:${RESET} ${DIM}$KEEP_DEBUG${RESET}"
 echo ""
 echo -e "${DIM}Press Ctrl+C to stop the relay${RESET}"
 
