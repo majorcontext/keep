@@ -18,7 +18,7 @@ make test-unit
 make test-unit ARGS='-run TestName'
 
 # E2E tests
-go test -tags=e2e -v ./internal/e2e/
+make test-e2e
 
 # With coverage (includes race detector)
 make coverage
@@ -27,7 +27,7 @@ make coverage
 ## Linting
 
 ```bash
-golangci-lint run
+make lint
 ```
 
 ## Architecture
@@ -50,8 +50,6 @@ internal/
   gateway/             LLM gateway transport (block decomposition, payload reassembly)
   redact/              Redaction pattern matching and field mutation
 ```
-
-TK: Update architecture once package structure is finalized.
 
 ### Key Flows
 
@@ -86,8 +84,10 @@ Keep uses CEL with custom functions:
 - `inTimeWindow(start, end, tz)` -- temporal predicate against `context.timestamp`
 - `dayOfWeek()` / `dayOfWeek(tz)` -- day name from `context.timestamp`
 - `containsAny(field, terms)` -- case-insensitive keyword match
-- `containsPII(field)` -- named regex library (SSN, CC, etc.)
-- `containsPHI(field)` -- PHI pattern detection
+- `lower(field)` -- lowercase string
+- `upper(field)` -- uppercase string
+- `matchesDomain(field, domain)` -- email domain match
+- `hasSecrets(field)` -- detect secrets via gitleaks patterns
 - `rateCount(key, window)` -- sliding window counter (local store)
 - `estimateTokens(field)` -- rough token count (chars / 4)
 
@@ -95,15 +95,15 @@ Keep uses CEL with custom functions:
 
 ### MCP relay with Linear
 
-TK: Add manual testing instructions once the relay is implemented.
+See `demo/` for a working relay example with SQLite.
 
 ### LLM gateway with Anthropic
 
-TK: Add manual testing instructions once the gateway is implemented.
+See `demo/` for gateway configuration examples.
 
 ### Library integration
 
-TK: Add manual testing instructions once the library API is stable.
+See `demo/` for library integration examples.
 
 ## Code Style & Guidelines
 
@@ -117,4 +117,4 @@ Key points:
 
 ## Data Directory Structure
 
-TK: Define data directory structure once runtime storage needs are clear. Expected to include rule file locations, audit log output, and rate counter state.
+Rules are loaded from a directory specified at startup. Audit logs are written to stdout in structured JSON format. Rate counter state is held in-memory for the lifetime of the process.

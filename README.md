@@ -18,8 +18,6 @@ For design rationale and principles, see [VISION.md](VISION.md). For the full pr
 go install github.com/majorcontext/keep/cmd/keep@latest
 ```
 
-TK: Add Homebrew tap instructions here once packaging is set up.
-
 **Requirements:** Go 1.25+.
 
 ## Quick start
@@ -54,10 +52,8 @@ keep validate ./rules
 ### 3. Test against sample calls
 
 ```bash
-keep test ./rules --fixture fixtures/linear-create-p0.json
+keep test ./rules --fixtures fixtures/linear-create-p0.json
 ```
-
-TK: Add fixture file format and example here.
 
 ### 4. Run the MCP relay
 
@@ -84,16 +80,24 @@ The agent connects to the relay's listen port. The relay routes tool calls to up
 The core. Loads rule files, evaluates calls, returns allow/deny/redact decisions. Ships as a Go library. Import it directly for inline policy checks in agent applications.
 
 ```go
-engine, _ := keep.Load("./rules")
-result := engine.Evaluate(call, "linear-tools")
-if result.Decision == "deny" {
+engine, err := keep.Load("./rules")
+if err != nil {
+    log.Fatal(err)
+}
+defer engine.Close()
+
+result, err := engine.Evaluate(call, "linear-tools")
+if err != nil {
+    log.Fatal(err)
+}
+if result.Decision == keep.Deny {
     // handle denial
 }
 ```
 
 ### `keep-mcp-relay` -- MCP proxy with policy
 
-A convenience binary that imports the engine, speaks MCP, and proxies to multiple downstream MCP servers from a single listen port.
+A convenience binary that imports the engine, speaks MCP, and proxies to multiple upstream MCP servers from a single listen port.
 
 ```yaml
 # keep-mcp-relay.yaml
@@ -223,7 +227,6 @@ See the language specification in [docs/plans/2026-03-17-language-spec.md](docs/
 | `keep-mcp-relay` | Run the MCP relay |
 | `keep-llm-gateway` | Run the LLM gateway |
 
-TK: Add full CLI reference once commands are implemented.
 
 ## How it works
 
@@ -231,15 +234,11 @@ TK: Add full CLI reference once commands are implemented.
 
 **Expression language:** CEL (Common Expression Language) -- non-Turing-complete, linear-time evaluation, no side effects. Supports field access, string matching, collection operators, temporal predicates, rate limiting, and content pattern detection.
 
-**MCP relay:** Accepts MCP connections from agents, proxies to downstream MCP servers. One tool call = one Keep call. Deny returns an MCP error. Redact mutates tool input before forwarding.
+**MCP relay:** Accepts MCP connections from agents, proxies to upstream MCP servers. One tool call = one Keep call. Deny returns an MCP error. Redact mutates tool input before forwarding.
 
 **LLM gateway:** Decomposes LLM message payloads into per-content-block calls. `llm.tool_result`, `llm.tool_use`, `llm.request`, `llm.response` -- each evaluated as a flat call. Bidirectional: filters both what the model sees and what the model wants to do.
 
 **Audit logging:** Every evaluation produces a structured JSON log entry -- timestamp, scope, operation, agent identity, rules evaluated, decision.
-
-## Documentation
-
-TK: Add documentation links once docs site is set up.
 
 ## Contributing
 
