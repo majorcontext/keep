@@ -1,0 +1,11 @@
+listen: ":19090"
+rules_dir: RULES_DIR
+
+routes:
+  - scope: demo-sqlite
+    command: COMMAND
+    args: ARGS
+
+log:
+  format: json
+  output: LOG_OUTPUT

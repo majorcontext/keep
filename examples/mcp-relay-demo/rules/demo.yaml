@@ -1,0 +1,28 @@
+scope: demo-sqlite
+mode: enforce
+
+rules:
+  # Block all write operations — database is read-only
+  - name: block-writes
+    match:
+      operation: "write_query"
+    action: deny
+    message: "Database is read-only. Write operations are not permitted."
+
+  # Redact plaintext passwords from query results
+  - name: redact-passwords
+    match:
+      operation: "read_query"
+      when: "context.direction == 'response'"
+    action: redact
+    redact:
+      target: "params.content"
+      patterns:
+        - match: "hunter2|p@ssw0rd!|letmein123|qwerty456|trustno1!|baseball9|shadow99!|dragon123|master!42|abc123xyz|welcome1!|passw0rd!"
+          replace: "********"
+
+  # Log everything
+  - name: audit-all
+    match:
+      operation: "*"
+    action: log
