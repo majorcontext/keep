@@ -33,7 +33,7 @@ test-unit: ## Run unit tests with race detector (use ARGS for filtering, e.g., A
 	go test -race $(ARGS) ./...
 
 test-e2e: ## Run E2E tests (use ARGS for filtering, e.g., ARGS='-run TestName')
-	go test -tags=e2e $(ARGS) ./internal/e2e/
+	@if [ -d internal/e2e ]; then go test -tags=e2e $(ARGS) ./internal/e2e/; else echo "No E2E tests found (internal/e2e/ does not exist), skipping"; fi
 
 test-integration: ## Run integration tests (builds CLI binary)
 	go test -tags=integration -v ./cmd/keep/cli/
