@@ -242,8 +242,10 @@ See the language specification in [docs/plans/2026-03-17-language-spec.md](docs/
 
 ## Documentation
 
-- [Language specification](docs/plans/2026-03-17-language-spec.md) — Rule file format, expression language, integration config reference
-- [VISION.md](VISION.md) — Design rationale and principles
+- [Getting started](docs/content/getting-started/) — Introduction, installation, quick start
+- [Concepts](docs/content/concepts/) — Evaluation model, expressions, scopes, redaction, LLM decomposition, audit logging
+- [Guides](docs/content/guides/) — MCP relay, LLM gateway, writing rules, testing, secret detection, Go library
+- [Reference](docs/content/reference/) — CLI, rule file schema, CEL functions, relay config, gateway config, environment variables
 
 ## Contributing
 
