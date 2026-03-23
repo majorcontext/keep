@@ -125,6 +125,13 @@ func (c *StdioClient) call(_ context.Context, method string, params any) (*JSONR
 			continue
 		}
 
+		// Validate response ID matches our request.
+		if idFloat, ok := rpcResp.ID.(float64); ok {
+			if int32(idFloat) != id {
+				continue // Not our response; skip.
+			}
+		}
+
 		if rpcResp.Error != nil {
 			return nil, fmt.Errorf("mcp: rpc error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
 		}

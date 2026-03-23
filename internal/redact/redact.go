@@ -2,6 +2,7 @@
 package redact
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -28,7 +29,11 @@ type CompiledPattern struct {
 // CompilePatterns compiles a list of config redact patterns into CompiledPatterns.
 func CompilePatterns(patterns []config.RedactPattern) ([]CompiledPattern, error) {
 	compiled := make([]CompiledPattern, 0, len(patterns))
+	const maxPatternLen = 1024
 	for _, p := range patterns {
+		if len(p.Match) > maxPatternLen {
+			return nil, fmt.Errorf("redact pattern too long (%d chars, max %d)", len(p.Match), maxPatternLen)
+		}
 		re, err := regexp.Compile(p.Match)
 		if err != nil {
 			return nil, err

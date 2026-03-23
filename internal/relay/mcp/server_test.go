@@ -93,8 +93,28 @@ func TestServer_Initialize(t *testing.T) {
 	}
 }
 
+// initializeServer sends an initialize request to put the server in the initialized state.
+func initializeServer(t *testing.T, srv *Server) {
+	t.Helper()
+	w := postJSON(t, srv, JSONRPCRequest{
+		JSONRPC: "2.0",
+		ID:      99,
+		Method:  "initialize",
+		Params: map[string]any{
+			"protocolVersion": "2025-03-26",
+			"capabilities":    map[string]any{},
+			"clientInfo":      map[string]any{"name": "test", "version": "1"},
+		},
+	})
+	resp := decodeResponse(t, w)
+	if resp.Error != nil {
+		t.Fatalf("initialize failed: %+v", resp.Error)
+	}
+}
+
 func TestServer_ListTools(t *testing.T) {
 	srv := NewServer(testTools, &mockHandler{})
+	initializeServer(t, srv)
 
 	w := postJSON(t, srv, JSONRPCRequest{
 		JSONRPC: "2.0",
@@ -135,6 +155,7 @@ func TestServer_CallTool(t *testing.T) {
 		},
 	}
 	srv := NewServer(testTools, handler)
+	initializeServer(t, srv)
 
 	args := map[string]any{"greeting": "hi"}
 	w := postJSON(t, srv, JSONRPCRequest{
@@ -178,6 +199,7 @@ func TestServer_CallTool_Error(t *testing.T) {
 		err: errors.New("something went wrong"),
 	}
 	srv := NewServer(testTools, handler)
+	initializeServer(t, srv)
 
 	w := postJSON(t, srv, JSONRPCRequest{
 		JSONRPC: "2.0",
@@ -200,8 +222,8 @@ func TestServer_CallTool_Error(t *testing.T) {
 	if resp.Error.Code != -32000 {
 		t.Errorf("expected error code -32000, got %d", resp.Error.Code)
 	}
-	if resp.Error.Message != "something went wrong" {
-		t.Errorf("expected error message 'something went wrong', got %q", resp.Error.Message)
+	if resp.Error.Message != "tool call failed" {
+		t.Errorf("expected error message 'tool call failed', got %q", resp.Error.Message)
 	}
 }
 

@@ -24,6 +24,8 @@ const defaultStringLimitValue = 120
 func DefaultStringLimit() int { return defaultStringLimitValue }
 
 // VerboseWriter writes human-readable packet dumps to an io.Writer (typically stderr).
+// WARNING: Verbose output may contain sensitive data (API keys, tokens, PII).
+// Only enable in development/debugging. Never enable in production.
 type VerboseWriter struct {
 	w           io.Writer
 	stringLimit int // max chars for string values; 0 = no truncation

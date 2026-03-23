@@ -226,6 +226,9 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 					if !ok {
 						return types.Bool(false)
 					}
+					if cfg.secretDetector == nil {
+						return types.Bool(false)
+					}
 					findings := cfg.secretDetector.Detect(string(s))
 					return types.Bool(len(findings) > 0)
 				}),
@@ -250,7 +253,7 @@ func (e *Env) Compile(expr string) (*Program, error) {
 	if iss.Err() != nil {
 		return nil, fmt.Errorf("cel: compile %q: %w", expr, iss.Err())
 	}
-	prog, err := e.env.Program(ast)
+	prog, err := e.env.Program(ast, cel.CostLimit(100000))
 	if err != nil {
 		return nil, fmt.Errorf("cel: program %q: %w", expr, err)
 	}

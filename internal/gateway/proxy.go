@@ -26,6 +26,11 @@ const maxRequestBodySize = 4 * 1024 * 1024
 // maxResponseBodySize is the maximum size of an upstream response body we will read (16 MB).
 const maxResponseBodySize = 16 << 20 // 16 MB
 
+// maxSSEEvents is the maximum number of SSE events buffered during streaming.
+// A typical Anthropic response generates ~100-500 events. This cap prevents
+// memory exhaustion from malformed or malicious streams.
+const maxSSEEvents = 10000
+
 // Proxy is the LLM gateway HTTP handler.
 type Proxy struct {
 	engine    *keep.Engine
@@ -455,6 +460,11 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 			return
 		}
 		events = append(events, ev)
+		if len(events) > maxSSEEvents {
+			p.logDebug("SSE event limit exceeded", "limit", maxSSEEvents)
+			writeInternalError(w, "upstream response too large")
+			return
+		}
 		if ev.Type == "message_stop" {
 			break
 		}
@@ -560,27 +570,24 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 	}
 }
 
-// hopByHopHeaders are HTTP/1.1 hop-by-hop headers that must not be forwarded.
-var hopByHopHeaders = map[string]bool{
-	"Connection":          true,
-	"Keep-Alive":          true,
-	"Proxy-Authenticate":  true,
-	"Proxy-Authorization": true,
-	"Te":                  true,
-	"Trailer":             true,
-	"Transfer-Encoding":   true,
-	"Upgrade":             true,
-	"Host":                true,
-	"Content-Length":       true, // recalculated by http.Client for the new body
-	"Accept-Encoding":     true, // let Go's Transport handle compression transparently
+// allowedRequestHeaders lists headers that are forwarded to the upstream.
+// This is an allowlist rather than a denylist to prevent accidentally
+// forwarding sensitive headers (cookies, internal auth) to the upstream.
+var allowedRequestHeaders = map[string]bool{
+	"Authorization":     true,
+	"Content-Type":      true,
+	"Accept":            true,
+	"User-Agent":        true,
+	"X-Request-Id":      true,
+	"Anthropic-Version": true,
+	"Anthropic-Beta":    true,
+	"X-Api-Key":         true,
 }
 
-// copyRequestHeaders copies all headers from the incoming request to the upstream request,
-// skipping hop-by-hop headers. This ensures auth headers, vendor-specific headers, and
-// any other headers Claude Code sends are forwarded transparently.
+// copyRequestHeaders copies allowed headers from the incoming request to the upstream request.
 func copyRequestHeaders(dst *http.Request, src *http.Request) {
 	for key, values := range src.Header {
-		if hopByHopHeaders[http.CanonicalHeaderKey(key)] {
+		if !allowedRequestHeaders[http.CanonicalHeaderKey(key)] {
 			continue
 		}
 		for _, v := range values {

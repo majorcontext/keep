@@ -51,6 +51,10 @@ func parseWindow(window string) (time.Duration, error) {
 
 // rateCountFunc increments the counter and returns the count within the window.
 //
+// NOTE: Rate limit keys are global across all scopes. Users should include
+// scope information in their key expressions (e.g., rateCount(context.scope + ":" + context.agent_id, "1h"))
+// to avoid cross-scope counter collisions.
+//
 // NOTE: rateCount always increments the counter, even in audit_only mode.
 // This means audit_only evaluation has a side effect on rate counters.
 // This is a known limitation — suppressing increment in audit_only would

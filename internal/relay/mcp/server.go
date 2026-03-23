@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
 )
 
@@ -13,9 +14,10 @@ type Handler interface {
 
 // Server is an MCP Streamable HTTP server.
 type Server struct {
-	tools   []Tool
-	handler Handler
-	info    ServerInfo
+	tools       []Tool
+	handler     Handler
+	info        ServerInfo
+	initialized bool
 }
 
 // NewServer creates an MCP server with the given tools and handler.
@@ -66,8 +68,13 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			},
 			ServerInfo: s.info,
 		}
+		s.initialized = true
 
 	case "tools/list":
+		if !s.initialized {
+			resp.Error = &JSONRPCError{Code: -32002, Message: "server not initialized"}
+			break
+		}
 		tools := s.tools
 		if tools == nil {
 			tools = []Tool{}
@@ -75,6 +82,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		resp.Result = ListToolsResult{Tools: tools}
 
 	case "tools/call":
+		if !s.initialized {
+			resp.Error = &JSONRPCError{Code: -32002, Message: "server not initialized"}
+			break
+		}
 		// Parse params
 		paramsBytes, _ := json.Marshal(req.Params)
 		var params ToolCallParams
@@ -84,7 +95,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		result, err := s.handler.HandleToolCall(r.Context(), params.Name, params.Arguments)
 		if err != nil {
-			resp.Error = &JSONRPCError{Code: -32000, Message: err.Error()}
+			log.Printf("mcp: tool call %q failed: %v", params.Name, err)
+		resp.Error = &JSONRPCError{Code: -32000, Message: "tool call failed"}
 			break
 		}
 		resp.Result = result

@@ -467,6 +467,9 @@ func getNestedString(params map[string]any, keys []string) string {
 
 // paramsSummary returns a JSON-serialized summary of params, truncated to 256 runes.
 // When truncated, an ellipsis marker ("...") is appended.
+//
+// Note: For deny decisions that short-circuit before redaction, this may contain
+// unredacted values. Audit log access should be restricted accordingly.
 func paramsSummary(params map[string]any) string {
 	if params == nil {
 		return "{}"
