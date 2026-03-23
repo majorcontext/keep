@@ -17,9 +17,6 @@ make test-unit
 # Single test
 make test-unit ARGS='-run TestName'
 
-# E2E tests
-make test-e2e
-
 # With coverage (includes race detector)
 make coverage
 ```

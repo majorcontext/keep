@@ -1,4 +1,4 @@
-.PHONY: all help build build-cli build-relay build-gateway test test-unit test-e2e test-integration lint lint-yaml fix fix-yaml clean coverage snapshot
+.PHONY: all help build build-cli build-relay build-gateway test test-unit test-integration lint lint-yaml fix fix-yaml clean coverage snapshot
 
 # Default target - running "make" shows help
 all: help
@@ -11,7 +11,6 @@ help: ## Show this help message
 	@echo "Examples:"
 	@echo "  make test                    # Run all tests"
 	@echo "  make test-unit               # Run only unit tests"
-	@echo "  make test-e2e                # Run only E2E tests"
 	@echo "  make test-unit ARGS='-run TestName'           # Run specific unit test"
 	@echo "  make test-unit ARGS='-run TestName ./internal/engine'  # Run test in specific package"
 
@@ -27,13 +26,10 @@ build-relay: ## Build the keep-mcp-relay binary
 build-gateway: ## Build the keep-llm-gateway binary
 	go build -ldflags "-s -w" -o keep-llm-gateway ./cmd/keep-llm-gateway
 
-test: test-unit test-e2e ## Run all tests (unit + E2E)
+test: test-unit ## Run all tests
 
 test-unit: ## Run unit tests with race detector (use ARGS for filtering, e.g., ARGS='-run TestName')
 	go test -race $(ARGS) ./...
-
-test-e2e: ## Run E2E tests (use ARGS for filtering, e.g., ARGS='-run TestName')
-	@if [ -d internal/e2e ]; then go test -tags=e2e $(ARGS) ./internal/e2e/; else echo "No E2E tests found (internal/e2e/ does not exist), skipping"; fi
 
 test-integration: ## Run integration tests (builds CLI binary)
 	go test -tags=integration -v ./cmd/keep/cli/

@@ -25,7 +25,6 @@ Examples:
 ```bash
 make build          # Build all packages
 make test-unit      # Unit tests with race detector
-make test-e2e       # E2E tests
 make lint           # golangci-lint
 make fix            # Auto-fix lint/format issues
 ```
