@@ -26,6 +26,8 @@ Rule files are YAML documents. The engine loads all `.yaml` and `.yml` files fro
 scope: string               # required -- unique name for this rule set
 profile: string              # optional -- name of a profile to load (field aliases)
 mode: enforce | audit_only   # optional -- default: audit_only
+on_error: closed | open      # optional -- default: closed (deny on CEL eval error)
+defs: map(string, string)    # optional -- named constants substituted into CEL expressions
 packs: []PackRef             # optional -- starter packs to import
 rules: []Rule                # required -- list of rules
 ```
@@ -48,6 +50,45 @@ mode: audit_only     # rules are evaluated and logged but never enforced (defaul
 ```
 
 New scopes default to `audit_only`. This supports the deny/audit/tune workflow: deploy with observation, review logs, switch to enforce.
+
+### On Error
+
+```yaml
+on_error: closed     # deny the call when a CEL expression errors (default)
+on_error: open       # allow the call when a CEL expression errors
+```
+
+Controls behavior when a CEL `when` expression fails at evaluation time (e.g., type mismatch, unexpected null). In `closed` mode (the default), an evaluation error is treated as a deny -- the call is blocked immediately with an error message. In `open` mode, the error is recorded but the rule is treated as not matched, and evaluation continues.
+
+In `audit_only` mode, errors are always treated as not matched regardless of `on_error`.
+
+### Defs
+
+`defs` is a map of named string constants. Each key is substituted as an identifier in CEL `when` expressions, using the same resolution mechanism as profile aliases. This allows extracting repeated values (lists, strings, thresholds) into named constants at the top of the file.
+
+```yaml
+scope: email-tools
+defs:
+  internal_domains: '["example.com", "example.org"]'
+  max_recipients: "10"
+
+rules:
+  - name: external-recipients
+    match:
+      when: "params.to.exists(addr, !(addr in internal_domains))"
+    action: deny
+    message: "External recipients are not permitted."
+
+  - name: too-many-recipients
+    match:
+      when: "size(params.to) > max_recipients"
+    action: deny
+    message: "Too many recipients."
+```
+
+Defs values are raw strings that are textually substituted into the expression before compilation. The value must be a valid CEL sub-expression (e.g., a list literal, string literal, or integer). Defs are resolved after profile aliases, so they can coexist with profiles.
+
+Def names follow the same rules as alias names: `[a-z][a-z0-9_]*`, maximum 32 characters.
 
 ### Rules
 
@@ -152,9 +193,33 @@ Multiple redact rules can match the same call. Mutations are applied in rule ord
 ```yaml
 redact:
   target: string          # required -- dot-path to the string field to scan
-  patterns:               # required -- list of patterns
+  secrets: bool           # optional -- enable gitleaks-based automatic secret detection
+  patterns:               # optional -- list of patterns (required if secrets is false/omitted)
     - match: string       # required -- regex pattern (RE2 syntax)
       replace: string     # required -- replacement string
+```
+
+**`secrets`** -- when set to `true`, enables automatic secret detection on the target field using the gitleaks engine (~160 built-in patterns covering AWS keys, private keys, API tokens, database credentials, etc.). Detected secrets are replaced with `[REDACTED:<rule-id>]` where `rule-id` is the gitleaks rule identifier (e.g., `aws-access-key`). Secret detection runs before custom `patterns`, so custom patterns operate on already-redacted text. A redact block may use `secrets: true` alone, `patterns` alone, or both.
+
+```yaml
+# Automatic secret detection only
+- name: strip-secrets
+  match:
+    operation: "llm.tool_result"
+  action: redact
+  redact:
+    target: "params.content"
+    secrets: true
+
+# Combined: automatic secrets plus custom patterns
+- name: strip-all-sensitive
+  action: redact
+  redact:
+    target: "params.content"
+    secrets: true
+    patterns:
+      - match: "(?i)ssn:\\s*\\d{3}-\\d{2}-\\d{4}"
+        replace: "[REDACTED:SSN]"
 ```
 
 Regex syntax is RE2 (linear-time, no backtracking). This is the same dialect used by Go's `regexp` package and CEL's `matches()` function.
@@ -466,6 +531,54 @@ containsAny(params.text, ["<!here>", "<!channel>"])
 
 PII and PHI detection is handled via explicit regex patterns in redact rules targeting specific fields, rather than built-in functions. This avoids a false sense of security from shallow regex wrappers and makes the detection logic transparent and auditable. See the redact block syntax in Part 1.
 
+### Custom functions: string manipulation
+
+```
+lower(s: string) -> string
+```
+
+Returns the lowercase version of the string:
+
+```cel
+lower(params.status) == "active"
+```
+
+```
+upper(s: string) -> string
+```
+
+Returns the uppercase version of the string:
+
+```cel
+upper(params.code) == "US"
+```
+
+```
+matchesDomain(email: string, domains: list(string)) -> bool
+```
+
+Returns true if the email address belongs to one of the given domains. Extracts the domain from the email (after `@`) and checks for exact match or subdomain match (case-insensitive). Returns false if the input is not a valid email address.
+
+```cel
+matchesDomain(params.to, ["example.com", "company.org"])
+matchesDomain(params.from, ["competitor.com"])         // also matches user@sub.competitor.com
+```
+
+### Custom functions: secret detection
+
+```
+hasSecrets(field: string) -> bool
+```
+
+Returns true if the gitleaks engine detects any secrets in the string. Uses the same ~160 built-in patterns as `secrets: true` in the redact block. Useful in `when` clauses to deny or log calls that contain secrets without redacting them.
+
+```cel
+hasSecrets(params.content)
+hasSecrets(params.input.command)
+```
+
+Requires a secret detector to be configured in the engine. If no detector is configured, returns false.
+
 ### Custom functions: rate limiting
 
 ```
@@ -574,6 +687,10 @@ routes:                            # required -- list of upstream MCP servers
       type: bearer
       token_env: "GITHUB_TOKEN"
 
+  - scope: sqlite-tools             # stdio subprocess transport
+    command: "uvx"
+    args: ["mcp-server-sqlite", "--db-path", "./data.db"]
+
 log:                               # optional -- audit log config
   format: json                     # json | text
   output: stdout                   # stdout | stderr | file path
@@ -584,11 +701,15 @@ Route fields:
 | Field | Required | Description |
 |---|---|---|
 | `scope` | yes | Scope name -- must match a scope in rule files |
-| `upstream` | yes | URL of the downstream MCP server |
+| `upstream` | conditional | URL of the upstream MCP server (HTTP/SSE transport) |
+| `command` | conditional | Executable to launch as a stdio subprocess |
+| `args` | no | Arguments for the `command` subprocess |
 | `auth` | no | Authentication for the upstream connection |
 | `auth.type` | yes (if auth) | `bearer`, `header`, or `passthrough` |
 | `auth.token_env` | no | Environment variable containing the token |
 | `auth.header` | no | Header name for `type: header` |
+
+Each route must specify exactly one transport: either `upstream` (HTTP/SSE) or `command` (stdio subprocess). They are mutually exclusive.
 
 Auth types:
 - `bearer` -- sends `Authorization: Bearer <token>` to upstream
@@ -774,10 +895,13 @@ rules:
 ## Appendix C: Grammar summary (pseudo-BNF)
 
 ```
-RuleFile       = ScopeDecl ProfileDecl? ModeDecl? PackRefs? Rules
+RuleFile       = ScopeDecl ProfileDecl? ModeDecl? OnErrorDecl? DefsDecl? PackRefs? Rules
 ScopeDecl      = "scope:" SCOPE_NAME
 ProfileDecl    = "profile:" IDENTIFIER
 ModeDecl       = "mode:" ("enforce" | "audit_only")
+OnErrorDecl    = "on_error:" ("closed" | "open")
+DefsDecl       = "defs:" Def+
+Def            = ALIAS_NAME ":" STRING
 PackRefs       = "packs:" PackRef+
 PackRef        = "- name:" IDENTIFIER Overrides?
 Overrides      = "overrides:" Override+
@@ -795,8 +919,9 @@ OperationMatch = "operation:" GLOB_PATTERN
 WhenClause     = "when:" CEL_EXPRESSION
 Action         = "action:" ("deny" | "log" | "redact")
 Message        = "message:" STRING
-RedactBlock    = "redact:" Target Patterns
+RedactBlock    = "redact:" Target SecretsFlag? Patterns?
 Target         = "target:" FIELD_PATH
+SecretsFlag    = "secrets:" BOOL
 Patterns       = "patterns:" Pattern+
 Pattern        = "- match:" REGEX "replace:" STRING
 Description    = "description:" STRING
