@@ -1,4 +1,4 @@
-.PHONY: all help build build-cli build-relay build-gateway test test-unit test-e2e test-integration lint fix clean coverage snapshot
+.PHONY: all help build build-cli build-relay build-gateway test test-unit test-e2e test-integration lint lint-yaml fix fix-yaml clean coverage snapshot
 
 # Default target - running "make" shows help
 all: help
@@ -38,13 +38,21 @@ test-e2e: ## Run E2E tests (use ARGS for filtering, e.g., ARGS='-run TestName')
 test-integration: ## Run integration tests (builds CLI binary)
 	go test -tags=integration -v ./cmd/keep/cli/
 
-lint: ## Run linter (requires golangci-lint v2)
+lint: lint-yaml ## Run all linters (requires golangci-lint v2)
 	@which golangci-lint > /dev/null || (echo "golangci-lint not installed. Install from https://golangci-lint.run/usage/install/" && exit 1)
 	golangci-lint run
 
-fix: ## Auto-fix linter and formatter issues (requires golangci-lint v2)
+lint-yaml: ## Check YAML formatting (requires yamlfmt)
+	@which yamlfmt > /dev/null || go install github.com/google/yamlfmt/cmd/yamlfmt@latest
+	yamlfmt -lint .
+
+fix: fix-yaml ## Auto-fix linter and formatter issues (requires golangci-lint v2)
 	@which golangci-lint > /dev/null || (echo "golangci-lint not installed. Install from https://golangci-lint.run/usage/install/" && exit 1)
 	golangci-lint run --fix
+
+fix-yaml: ## Auto-fix YAML formatting (requires yamlfmt)
+	@which yamlfmt > /dev/null || go install github.com/google/yamlfmt/cmd/yamlfmt@latest
+	yamlfmt .
 
 coverage: ## Generate test coverage report
 	go test -race -coverprofile=coverage.out -covermode=atomic ./...

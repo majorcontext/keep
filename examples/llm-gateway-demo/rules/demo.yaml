@@ -30,8 +30,7 @@ rules:
     match:
       operation: "llm.text"
       when: >
-        context.direction == 'request'
-        && matches(params.text, email_pattern)
+        context.direction == 'request' && matches(params.text, email_pattern)
     action: deny
     message: "PII detected in prompt. Use opaque customer IDs instead of names, emails, or other personally identifiable information."
 
@@ -40,8 +39,7 @@ rules:
     match:
       operation: "llm.tool_use"
       when: >
-        lower(params.name) == 'bash'
-        && containsAny(lower(params.input.command), destructive_patterns)
+        lower(params.name) == 'bash' && containsAny(lower(params.input.command), destructive_patterns)
     action: deny
     message: "Destructive command blocked by policy."
 
@@ -50,8 +48,7 @@ rules:
     match:
       operation: "llm.tool_use"
       when: >
-        lower(params.name) == 'bash'
-        && containsAny(lower(params.input.command), network_commands)
+        lower(params.name) == 'bash' && containsAny(lower(params.input.command), network_commands)
     action: deny
     message: "Network access is blocked by policy. Use approved API integrations instead."
 
