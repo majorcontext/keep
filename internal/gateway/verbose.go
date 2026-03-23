@@ -39,13 +39,13 @@ func NewVerboseWriter(w io.Writer, stringLimit int) *VerboseWriter {
 func (v *VerboseWriter) RequestRaw(body []byte) {
 	var obj map[string]any
 	if err := json.Unmarshal(body, &obj); err != nil {
-		fmt.Fprintf(v.w, "\n%s%s──▶ REQUEST%s\n", vBold, vCyan, vReset)
+		_, _ = fmt.Fprintf(v.w, "\n%s%s──▶ REQUEST%s\n", vBold, vCyan, vReset)
 		v.writePretty(body)
 		return
 	}
 
 	meta := v.requestMeta(obj)
-	fmt.Fprintf(v.w, "\n%s%s──▶ REQUEST%s  %s%s%s\n", vBold, vCyan, vReset, vDim, meta, vReset)
+	_, _ = fmt.Fprintf(v.w, "\n%s%s──▶ REQUEST%s  %s%s%s\n", vBold, vCyan, vReset, vDim, meta, vReset)
 	v.writeMessages(obj)
 }
 
@@ -57,7 +57,7 @@ func (v *VerboseWriter) RequestAfterPolicy(body []byte, rule string) {
 		if rule != "" {
 			label += ": " + rule
 		}
-		fmt.Fprintf(v.w, "%s%s──▶ REQUEST (%s)%s\n", vBold, vCyan, label, vReset)
+		_, _ = fmt.Fprintf(v.w, "%s%s──▶ REQUEST (%s)%s\n", vBold, vCyan, label, vReset)
 		v.writePretty(body)
 		return
 	}
@@ -66,38 +66,38 @@ func (v *VerboseWriter) RequestAfterPolicy(body []byte, rule string) {
 	if rule != "" {
 		label += ": " + rule
 	}
-	fmt.Fprintf(v.w, "%s%s──▶ REQUEST (%s)%s\n", vBold, vCyan, label, vReset)
+	_, _ = fmt.Fprintf(v.w, "%s%s──▶ REQUEST (%s)%s\n", vBold, vCyan, label, vReset)
 	v.writeMessages(obj)
 }
 
 // RequestDenied logs that a request was denied by policy.
 func (v *VerboseWriter) RequestDenied(rule, message string) {
-	fmt.Fprintf(v.w, "%s%s──▶ REQUEST DENIED%s  %s%s: %s%s\n",
+	_, _ = fmt.Fprintf(v.w, "%s%s──▶ REQUEST DENIED%s  %s%s: %s%s\n",
 		vBold, vRed, vReset, vDim, rule, message, vReset)
 }
 
 // RequestAllowed logs that the request passed policy unchanged.
 func (v *VerboseWriter) RequestAllowed() {
-	fmt.Fprintf(v.w, "%s%s──▶ REQUEST (policy: allow)%s\n", vBold, vGreen, vReset)
+	_, _ = fmt.Fprintf(v.w, "%s%s──▶ REQUEST (policy: allow)%s\n", vBold, vGreen, vReset)
 }
 
 // ResponseRaw logs the upstream response, showing metadata as a header and content pretty-printed.
 func (v *VerboseWriter) ResponseRaw(body []byte) {
 	var obj map[string]any
 	if err := json.Unmarshal(body, &obj); err != nil {
-		fmt.Fprintf(v.w, "\n%s%s◀── RESPONSE%s\n", vBold, vCyan, vReset)
+		_, _ = fmt.Fprintf(v.w, "\n%s%s◀── RESPONSE%s\n", vBold, vCyan, vReset)
 		v.writePretty(body)
 		return
 	}
 
 	meta := v.responseMeta(obj)
-	fmt.Fprintf(v.w, "\n%s%s◀── RESPONSE%s  %s%s%s\n", vBold, vCyan, vReset, vDim, meta, vReset)
+	_, _ = fmt.Fprintf(v.w, "\n%s%s◀── RESPONSE%s  %s%s%s\n", vBold, vCyan, vReset, vDim, meta, vReset)
 	v.writeContent(obj)
 }
 
 // ResponseDenied logs that a response was denied by policy.
 func (v *VerboseWriter) ResponseDenied(rule, message string) {
-	fmt.Fprintf(v.w, "%s%s◀── RESPONSE DENIED%s  %s%s: %s%s\n",
+	_, _ = fmt.Fprintf(v.w, "%s%s◀── RESPONSE DENIED%s  %s%s: %s%s\n",
 		vBold, vRed, vReset, vDim, rule, message, vReset)
 }
 
@@ -109,7 +109,7 @@ func (v *VerboseWriter) ResponseAfterPolicy(body []byte, rule string) {
 		if rule != "" {
 			label += ": " + rule
 		}
-		fmt.Fprintf(v.w, "%s%s◀── RESPONSE (%s)%s\n", vBold, vCyan, label, vReset)
+		_, _ = fmt.Fprintf(v.w, "%s%s◀── RESPONSE (%s)%s\n", vBold, vCyan, label, vReset)
 		v.writePretty(body)
 		return
 	}
@@ -118,13 +118,13 @@ func (v *VerboseWriter) ResponseAfterPolicy(body []byte, rule string) {
 	if rule != "" {
 		label += ": " + rule
 	}
-	fmt.Fprintf(v.w, "%s%s◀── RESPONSE (%s)%s\n", vBold, vCyan, label, vReset)
+	_, _ = fmt.Fprintf(v.w, "%s%s◀── RESPONSE (%s)%s\n", vBold, vCyan, label, vReset)
 	v.writeContent(obj)
 }
 
 // ResponseAllowed logs that the response passed policy unchanged.
 func (v *VerboseWriter) ResponseAllowed() {
-	fmt.Fprintf(v.w, "%s%s◀── RESPONSE (policy: allow)%s\n\n", vBold, vGreen, vReset)
+	_, _ = fmt.Fprintf(v.w, "%s%s◀── RESPONSE (policy: allow)%s\n\n", vBold, vGreen, vReset)
 }
 
 // requestMeta extracts a compact metadata string from a request object.
@@ -181,7 +181,7 @@ func (v *VerboseWriter) writeContent(obj map[string]any) {
 func (v *VerboseWriter) writePretty(body []byte) {
 	var raw any
 	if err := json.Unmarshal(body, &raw); err != nil {
-		fmt.Fprintf(v.w, "    %s%s%s\n", vDim, string(body), vReset)
+		_, _ = fmt.Fprintf(v.w, "    %s%s%s\n", vDim, string(body), vReset)
 		return
 	}
 
@@ -191,12 +191,12 @@ func (v *VerboseWriter) writePretty(body []byte) {
 
 	pretty, err := json.MarshalIndent(raw, "    ", "  ")
 	if err != nil {
-		fmt.Fprintf(v.w, "    %s%s%s\n", vDim, string(body), vReset)
+		_, _ = fmt.Fprintf(v.w, "    %s%s%s\n", vDim, string(body), vReset)
 		return
 	}
 
 	for _, line := range strings.Split(string(pretty), "\n") {
-		fmt.Fprintf(v.w, "    %s%s%s\n", vDim, line, vReset)
+		_, _ = fmt.Fprintf(v.w, "    %s%s%s\n", vDim, line, vReset)
 	}
 }
 
@@ -217,8 +217,9 @@ func truncateStrings(v any, maxLen int) any {
 		}
 		return out
 	case string:
-		if len(val) > maxLen {
-			return val[:maxLen] + "…"
+		runes := []rune(val)
+		if len(runes) > maxLen {
+			return string(runes[:maxLen]) + "…"
 		}
 		return val
 	default:

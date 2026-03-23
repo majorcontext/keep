@@ -18,7 +18,7 @@ func mockUpstream(t *testing.T, tools []mcp.Tool) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req mcp.JSONRPCRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 
 		var resp mcp.JSONRPCResponse
 		resp.JSONRPC = "2.0"
@@ -38,7 +38,7 @@ func mockUpstream(t *testing.T, tools []mcp.Tool) *httptest.Server {
 			}
 		}
 
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 }
 
@@ -188,7 +188,7 @@ func TestRouter_MergedToolList(t *testing.T) {
 
 func TestRouter_MissingAuthToken(t *testing.T) {
 	const envVar = "TEST_MISSING_AUTH_TOKEN_VAR"
-	os.Unsetenv(envVar)
+	_ = os.Unsetenv(envVar)
 
 	routes := []relayconfig.Route{
 		{

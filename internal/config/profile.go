@@ -14,34 +14,10 @@ var aliasNameRe = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
 const maxAliasNameLen = 32
 
-// reservedWords is the set of alias names that must not be used because they
-// shadow CEL built-ins or top-level variable names.
-var reservedWords = map[string]bool{
-	"params":      true,
-	"context":     true,
-	"size":        true,
-	"has":         true,
-	"matches":     true,
-	"startsWith":  true,
-	"endsWith":    true,
-	"contains":    true,
-	"exists":      true,
-	"all":         true,
-	"filter":      true,
-	"map":         true,
-	"exists_one":  true,
-	"int":         true,
-	"uint":        true,
-	"double":      true,
-	"string":      true,
-	"bool":        true,
-	"bytes":       true,
-	"list":        true,
-	"type":        true,
-	"null":        true,
-	"true":        true,
-	"false":       true,
-}
+// reservedWords points to the shared ReservedNames set; alias names that
+// match any entry are rejected to prevent shadowing CEL built-ins or
+// Keep-specific functions.
+var reservedWords = ReservedNames
 
 // LoadProfiles reads all .yaml and .yml files from dir, parses them
 // as profiles, and validates alias names and targets.

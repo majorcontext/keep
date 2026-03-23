@@ -304,7 +304,7 @@ rules:
       target: "params.text"
       secrets: true
 `
-	os.WriteFile(filepath.Join(dir, "rules.yaml"), []byte(ruleYAML), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "rules.yaml"), []byte(ruleYAML), 0644)
 
 	eng, err := keep.Load(dir)
 	if err != nil {

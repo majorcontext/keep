@@ -13,7 +13,7 @@ help: ## Show this help message
 	@echo "  make test-unit               # Run only unit tests"
 	@echo "  make test-e2e                # Run only E2E tests"
 	@echo "  make test-unit ARGS='-run TestName'           # Run specific unit test"
-	@echo "  make test-unit ARGS='-run TestName ./internal/engine'"  # Run test in specific package"
+	@echo "  make test-unit ARGS='-run TestName ./internal/engine'  # Run test in specific package"
 
 build: ## Build the project
 	go build ./...
@@ -43,8 +43,7 @@ lint: lint-yaml ## Run all linters (requires golangci-lint v2)
 	golangci-lint run
 
 lint-yaml: ## Check YAML formatting (requires yamlfmt)
-	@which yamlfmt > /dev/null || go install github.com/google/yamlfmt/cmd/yamlfmt@latest
-	yamlfmt -lint .
+	@if command -v yamlfmt >/dev/null 2>&1; then yamlfmt -lint .; else echo "yamlfmt not found, skipping YAML lint"; fi
 
 fix: fix-yaml ## Auto-fix linter and formatter issues (requires golangci-lint v2)
 	@which golangci-lint > /dev/null || (echo "golangci-lint not installed. Install from https://golangci-lint.run/usage/install/" && exit 1)

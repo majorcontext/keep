@@ -21,7 +21,7 @@ func mockUpstreamWithEcho(t *testing.T, tools []mcp.Tool) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req mcp.JSONRPCRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 
 		var resp mcp.JSONRPCResponse
 		resp.JSONRPC = "2.0"
@@ -39,14 +39,14 @@ func mockUpstreamWithEcho(t *testing.T, tools []mcp.Tool) *httptest.Server {
 			// Echo back the arguments so tests can verify mutations.
 			paramsBytes, _ := json.Marshal(req.Params)
 			var params mcp.ToolCallParams
-			json.Unmarshal(paramsBytes, &params)
+			_ = json.Unmarshal(paramsBytes, &params)
 			argsJSON, _ := json.Marshal(params.Arguments)
 			resp.Result = mcp.ToolCallResult{
 				Content: []mcp.ContentBlock{{Type: "text", Text: string(argsJSON)}},
 			}
 		}
 
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 }
 
@@ -56,7 +56,7 @@ func mockUpstreamError(t *testing.T, tools []mcp.Tool) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req mcp.JSONRPCRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 
 		var resp mcp.JSONRPCResponse
 		resp.JSONRPC = "2.0"
@@ -74,7 +74,7 @@ func mockUpstreamError(t *testing.T, tools []mcp.Tool) *httptest.Server {
 			resp.Error = &mcp.JSONRPCError{Code: -32000, Message: "upstream internal error"}
 		}
 
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 }
 
@@ -252,7 +252,7 @@ func mockUpstreamWithFixedResponse(t *testing.T, tools []mcp.Tool, fixedResult m
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var req mcp.JSONRPCRequest
-		json.NewDecoder(r.Body).Decode(&req)
+		_ = json.NewDecoder(r.Body).Decode(&req)
 
 		var resp mcp.JSONRPCResponse
 		resp.JSONRPC = "2.0"
@@ -270,7 +270,7 @@ func mockUpstreamWithFixedResponse(t *testing.T, tools []mcp.Tool, fixedResult m
 			resp.Result = fixedResult
 		}
 
-		json.NewEncoder(w).Encode(resp)
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 }
 

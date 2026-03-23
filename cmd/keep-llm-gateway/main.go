@@ -56,7 +56,7 @@ func main() {
 		os.Exit(1)
 	}
 	if closer != nil {
-		defer closer.Close()
+		defer func() { _ = closer.Close() }()
 	}
 
 	// 4. Create proxy

@@ -19,7 +19,7 @@ var testCmd = &cobra.Command{
 
 func init() {
 	testCmd.Flags().String("fixtures", "", "Path to fixtures file or directory (required)")
-	testCmd.MarkFlagRequired("fixtures")
+	_ = testCmd.MarkFlagRequired("fixtures")
 	testCmd.Flags().String("profiles", "", "Path to profiles directory")
 	testCmd.Flags().String("packs", "", "Path to starter packs directory")
 	rootCmd.AddCommand(testCmd)
@@ -53,14 +53,14 @@ func runTest(cmd *cobra.Command, args []string) error {
 
 	eng, err := keep.Load(rulesDir, opts...)
 	if err != nil {
-		fmt.Fprintln(cmd.ErrOrStderr(), "Error:", err)
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Error:", err)
 		return err
 	}
 	defer eng.Close()
 
 	fixtures, err := LoadFixtures(fixturesPath)
 	if err != nil {
-		fmt.Fprintln(cmd.ErrOrStderr(), "Error:", err)
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Error:", err)
 		return err
 	}
 
@@ -69,7 +69,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 	failed := 0
 
 	for _, ff := range fixtures {
-		fmt.Fprintf(cmd.OutOrStdout(), "%s:\n", filepath.Base(ff.Path))
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s:\n", filepath.Base(ff.Path))
 
 		for _, tc := range ff.Tests {
 			total++
@@ -79,7 +79,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 			if tc.Call.Context != nil && tc.Call.Context.Timestamp != "" {
 				parsed, err := time.Parse(time.RFC3339, tc.Call.Context.Timestamp)
 				if err != nil {
-					fmt.Fprintf(cmd.ErrOrStderr(), "  FAIL  %s\n        invalid timestamp: %v\n", tc.Name, err)
+					_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "  FAIL  %s\n        invalid timestamp: %v\n", tc.Name, err)
 					failed++
 					continue
 				}
@@ -121,7 +121,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 			result, evalErr := eng.Evaluate(call, ctx.Scope)
 			if evalErr != nil {
 				failed++
-				fmt.Fprintf(cmd.OutOrStdout(), "  FAIL  %s\n        error: %v\n", tc.Name, evalErr)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  FAIL  %s\n        error: %v\n", tc.Name, evalErr)
 				continue
 			}
 
@@ -170,18 +170,18 @@ func runTest(cmd *cobra.Command, args []string) error {
 
 			if pass {
 				passed++
-				fmt.Fprintf(cmd.OutOrStdout(), "  PASS  %s\n", tc.Name)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  PASS  %s\n", tc.Name)
 			} else {
 				failed++
-				fmt.Fprintf(cmd.OutOrStdout(), "  FAIL  %s\n", tc.Name)
+				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  FAIL  %s\n", tc.Name)
 				for _, reason := range failReasons {
-					fmt.Fprintln(cmd.OutOrStdout(), reason)
+					_, _ = fmt.Fprintln(cmd.OutOrStdout(), reason)
 				}
 			}
 		}
 	}
 
-	fmt.Fprintf(cmd.OutOrStdout(), "\n%d tests, %d passed, %d failed\n", total, passed, failed)
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "\n%d tests, %d passed, %d failed\n", total, passed, failed)
 
 	if failed > 0 {
 		return fmt.Errorf("%d test(s) failed", failed)

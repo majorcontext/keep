@@ -159,7 +159,7 @@ func TestClient_CallTool_Error(t *testing.T) {
 func TestClient_HTTPError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("service down"))
+		_, _ = w.Write([]byte("service down"))
 	}))
 	defer srv.Close()
 
@@ -242,7 +242,7 @@ func TestClient_WithHeader(t *testing.T) {
 
 func TestClient_NoAuth_WhenEnvEmpty(t *testing.T) {
 	const envVar = "TEST_MCP_EMPTY_TOKEN"
-	os.Unsetenv(envVar)
+	_ = os.Unsetenv(envVar)
 
 	var gotAuth string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

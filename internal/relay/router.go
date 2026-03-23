@@ -88,7 +88,7 @@ func NewRouter(ctx context.Context, routes []relayconfig.Route) (*Router, error)
 				log.Printf("relay: upstream %q not ready (attempt %d/%d): %v", upstreamLabel, attempt+1, maxAttempts, initErr)
 				// Close the failed stdio client before retrying.
 				if closer, ok := client.(interface{ Close() error }); ok {
-					closer.Close()
+					_ = closer.Close()
 				}
 				time.Sleep(2 * time.Second)
 			}

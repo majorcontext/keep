@@ -112,41 +112,10 @@ func validateRule(i int, rule Rule) []error {
 	return errs
 }
 
-// reservedDefNames are identifiers that must not be used as def names because
-// they shadow CEL built-in variables or functions used by Keep.
-var reservedDefNames = map[string]bool{
-	"params":         true,
-	"context":        true,
-	"now":            true,
-	"size":           true,
-	"has":            true,
-	"matches":        true,
-	"startsWith":     true,
-	"endsWith":       true,
-	"contains":       true,
-	"containsAny":    true,
-	"estimateTokens": true,
-	"inTimeWindow":   true,
-	"rateCount":      true,
-	"lower":          true,
-	"upper":          true,
-	"matchesDomain":  true,
-	"dayOfWeek":      true,
-	"hassecrets":     true,
-	"int":            true,
-	"uint":           true,
-	"double":         true,
-	"bool":           true,
-	"string":         true,
-	"bytes":          true,
-	"list":           true,
-	"map":            true,
-	"type":           true,
-	"null_type":      true,
-	"true":           true,
-	"false":          true,
-	"null":           true,
-}
+// reservedDefNames points to the shared ReservedNames set; def names that
+// match any entry are rejected to prevent shadowing CEL built-ins or
+// Keep-specific functions.
+var reservedDefNames = ReservedNames
 
 func validateDefs(defs map[string]string) []error {
 	var errs []error

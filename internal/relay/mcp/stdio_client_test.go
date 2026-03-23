@@ -10,7 +10,7 @@ func TestStdioClient_InitializeAndListTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStdioClient: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 
@@ -44,7 +44,7 @@ func TestStdioClient_NoisyServer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStdioClient: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 
@@ -74,7 +74,7 @@ func TestStdioClient_CallTool(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStdioClient: %v", err)
 	}
-	defer client.Close()
+	defer func() { _ = client.Close() }()
 
 	ctx := context.Background()
 

@@ -43,13 +43,13 @@ func runValidate(cmd *cobra.Command, args []string) error {
 
 	eng, err := keep.Load(rulesDir, opts...)
 	if err != nil {
-		fmt.Fprintln(cmd.ErrOrStderr(), "Error:", err)
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Error:", err)
 		return err
 	}
 	defer eng.Close()
 
 	scopes := eng.Scopes()
-	fmt.Fprintf(cmd.OutOrStdout(), "OK (%d scopes, %s: 0 errors)\n",
+	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "OK (%d scopes, %s: 0 errors)\n",
 		len(scopes), strings.Join(scopes, ", "))
 	return nil
 }

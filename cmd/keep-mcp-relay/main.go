@@ -64,7 +64,7 @@ func main() {
 		os.Exit(1)
 	}
 	if closer != nil {
-		defer closer.Close()
+		defer func() { _ = closer.Close() }()
 	}
 
 	// 5. Create handler and MCP server
@@ -104,7 +104,7 @@ func main() {
 		log.Println("shutting down...")
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
-		httpServer.Shutdown(ctx)
+		_ = httpServer.Shutdown(ctx)
 	}()
 
 	tools := router.Tools()

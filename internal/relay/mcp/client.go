@@ -90,7 +90,7 @@ func (c *Client) call(ctx context.Context, method string, params any) (*JSONRPCR
 	if err != nil {
 		return nil, fmt.Errorf("mcp: http: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))

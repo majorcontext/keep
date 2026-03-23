@@ -554,7 +554,7 @@ func TestValidate_DefNameHasSecrets(t *testing.T) {
 		Rules: []Rule{
 			{Name: "r1", Match: Match{Operation: "op"}, Action: ActionLog},
 		},
-		Defs: map[string]string{"hassecrets": "'shadowed'"},
+		Defs: map[string]string{"hasSecrets": "'shadowed'"},
 	}
 	err := Validate(rf)
 	if err == nil || !strings.Contains(err.Error(), "shadows") {

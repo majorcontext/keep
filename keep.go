@@ -4,6 +4,7 @@ package keep
 import (
 	"fmt"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -121,7 +122,7 @@ func (e *Engine) Evaluate(call Call, scope string) (EvalResult, error) {
 	e.mu.RUnlock()
 
 	if !ok {
-		return EvalResult{}, fmt.Errorf("keep: scope %q not found", scope)
+		return EvalResult{}, fmt.Errorf("keep: scope %q not found (available: %s)", scope, strings.Join(e.Scopes(), ", "))
 	}
 
 	return ev.Evaluate(call), nil

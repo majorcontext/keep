@@ -79,7 +79,7 @@ func TestWriter_SetHeaders(t *testing.T) {
 	w.SetHeaders()
 
 	resp := rec.Result()
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
 		t.Errorf("Content-Type = %q, want %q", got, "text/event-stream")
