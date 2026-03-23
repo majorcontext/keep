@@ -45,18 +45,11 @@ if ! command -v sqlite3 &>/dev/null; then
   exit 1
 fi
 
-MCP_RUNNER=""
-if command -v npx &>/dev/null; then
-  MCP_RUNNER="npx"
-elif command -v bunx &>/dev/null; then
-  MCP_RUNNER="bunx"
-else
-  echo -e "${RED}Error:${RESET} npx or bunx is required but neither was found."
-  echo "  Install Node.js (https://nodejs.org) or Bun (https://bun.sh)"
+if ! command -v uvx &>/dev/null; then
+  echo -e "${RED}Error:${RESET} uvx is required but not found."
+  echo "  Install uv: https://docs.astral.sh/uv/getting-started/installation/"
   exit 1
 fi
-
-echo -e "${DIM}Using ${MCP_RUNNER} to run MCP sqlite server${RESET}"
 
 # ── Build ────────────────────────────────────────────────────────
 echo -e "${DIM}Building relay...${RESET}"
@@ -71,8 +64,8 @@ echo -e "${DIM}Seeded database with 12 users${RESET}"
 sed \
   -e "s|RULES_DIR|$SCRIPT_DIR/rules|" \
   -e "s|LOG_OUTPUT|$DEMO_DIR/audit.jsonl|" \
-  -e "s|COMMAND|$MCP_RUNNER|" \
-  -e "s|ARGS|[\"-y\", \"@modelcontextprotocol/server-sqlite\", \"$DB_PATH\"]|" \
+  -e "s|COMMAND|uvx|" \
+  -e "s|ARGS|[\"mcp-server-sqlite\", \"--db-path\", \"$DB_PATH\"]|" \
   "$SCRIPT_DIR/relay.yaml" > "$DEMO_DIR/relay.yaml"
 
 # ── Start relay ─────────────────────────────────────────────────
