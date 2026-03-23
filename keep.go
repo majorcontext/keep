@@ -22,6 +22,7 @@ type EvalResult = engine.EvalResult
 type Decision = engine.Decision
 type AuditEntry = engine.AuditEntry
 type RuleResult = engine.RuleResult
+type RedactedField = engine.RedactedField
 type Mutation = redact.Mutation
 
 // Decision constants re-exported from the engine package.

@@ -3,6 +3,8 @@ mode: enforce
 
 defs:
   destructive_patterns: "['rm -rf', 'DROP TABLE', 'TRUNCATE', 'mkfs']"
+  network_commands: "['curl ', 'wget ', 'nc ', 'ssh ', 'ncat ']"
+  email_pattern: "'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\\\.[a-zA-Z]{2,}'"
 
 rules:
   # Redact secrets from user text before they reach the model
@@ -23,23 +25,35 @@ rules:
       target: "params.content"
       secrets: true
 
+  # Block prompts containing customer PII (email addresses)
+  - name: block-pii-in-prompts
+    match:
+      operation: "llm.text"
+      when: >
+        context.direction == 'request'
+        && matches(params.text, email_pattern)
+    action: deny
+    message: "PII detected in prompt. Use opaque customer IDs instead of names, emails, or other personally identifiable information."
+
   # Block destructive bash commands from the model
   - name: block-destructive-bash
     match:
       operation: "llm.tool_use"
       when: >
-        params.name == 'bash'
+        lower(params.name) == 'bash'
         && containsAny(lower(params.input.command), destructive_patterns)
     action: deny
     message: "Destructive command blocked by policy."
 
-  # Block networking tools
+  # Block networking commands in bash (defense in depth)
   - name: block-networking
     match:
       operation: "llm.tool_use"
-      when: "params.name in ['curl', 'wget', 'nc', 'ssh']"
+      when: >
+        lower(params.name) == 'bash'
+        && containsAny(lower(params.input.command), network_commands)
     action: deny
-    message: "Networking tools are blocked by policy."
+    message: "Network access is blocked by policy. Use approved API integrations instead."
 
   # Log everything
   - name: audit-all

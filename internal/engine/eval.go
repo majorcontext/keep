@@ -64,7 +64,14 @@ type AuditEntry struct {
 	// Enforced is true when the Decision was actually applied to the call.
 	// It is false in audit_only mode, where Decision records what would have
 	// happened but the call is allowed regardless.
-	Enforced bool
+	Enforced       bool
+	RedactSummary  []RedactedField `json:",omitempty"`
+}
+
+// RedactedField records what was redacted without exposing the original value.
+type RedactedField struct {
+	Path     string // e.g. "params.text"
+	Replaced string // the post-redaction value (contains [REDACTED:...] placeholders)
 }
 
 // RuleResult records what happened when a single rule was checked.
@@ -373,6 +380,15 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 		summary = paramsSummary(mutatedParams)
 	}
 
+	// Build safe redact summary (path + replaced text, never the original).
+	var redactSummary []RedactedField
+	for _, m := range mutations {
+		redactSummary = append(redactSummary, RedactedField{
+			Path:     m.Path,
+			Replaced: m.Replaced,
+		})
+	}
+
 	return EvalResult{
 		Decision:  returnDecision,
 		Rule:      firstRedactRule,
@@ -385,9 +401,11 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 			UserID:         call.Context.UserID,
 			Direction:      call.Context.Direction,
 			Decision:       auditDecision,
+			Rule:           firstRedactRule,
 			RulesEvaluated: rulesEvaluated,
 			ParamsSummary:  summary,
 			Enforced:       enforced,
+			RedactSummary:  redactSummary,
 		},
 	}
 }

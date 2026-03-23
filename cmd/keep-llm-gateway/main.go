@@ -61,6 +61,16 @@ func main() {
 
 	// 4. Create proxy
 	var proxyOpts []gateway.ProxyOption
+	if v := os.Getenv("KEEP_VERBOSE"); v != "" {
+		stringLimit := gateway.DefaultStringLimit()
+		if v == "full" {
+			stringLimit = 0
+		}
+		proxyOpts = append(proxyOpts, gateway.WithVerboseWriter(
+			gateway.NewVerboseWriter(os.Stderr, stringLimit),
+		))
+		log.Printf("verbose mode enabled (string_limit=%d)", stringLimit)
+	}
 	if debugPath := os.Getenv("KEEP_DEBUG"); debugPath != "" {
 		debugFile, err := os.OpenFile(debugPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 		if err != nil {
@@ -70,6 +80,11 @@ func main() {
 		defer debugFile.Close() //nolint:errcheck
 		debugLogger := slog.New(slog.NewTextHandler(debugFile, &slog.HandlerOptions{Level: slog.LevelDebug}))
 		proxyOpts = append(proxyOpts, gateway.WithDebugLogger(debugLogger))
+		// When verbose mode is active, redirect Go's default logger to the
+		// debug file so stderr stays clean for verbose packet output.
+		if os.Getenv("KEEP_VERBOSE") != "" {
+			log.SetOutput(debugFile)
+		}
 		log.Printf("debug logging enabled: %s", debugPath)
 	}
 

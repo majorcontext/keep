@@ -33,6 +33,7 @@ type Proxy struct {
 	decompose gwconfig.DecomposeConfig
 	logger    *audit.Logger
 	debug     *slog.Logger
+	verbose   *VerboseWriter
 	passthru  *httputil.ReverseProxy // for non-messages passthrough
 	client    *http.Client           // for /v1/messages upstream requests
 }
@@ -70,6 +71,11 @@ type ProxyOption func(*Proxy)
 // WithDebugLogger enables debug logging to the given slog.Logger.
 func WithDebugLogger(l *slog.Logger) ProxyOption {
 	return func(p *Proxy) { p.debug = l }
+}
+
+// WithVerboseWriter enables verbose packet logging.
+func WithVerboseWriter(v *VerboseWriter) ProxyOption {
+	return func(p *Proxy) { p.verbose = v }
 }
 
 // logDebug emits a debug log if debug logging is enabled.
@@ -134,6 +140,11 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verbose: log raw request.
+	if p.verbose != nil {
+		p.verbose.RequestRaw(body)
+	}
+
 	// 2. Parse as MessagesRequest.
 	var req anthropic.MessagesRequest
 	if err := json.Unmarshal(body, &req); err != nil {
@@ -184,6 +195,9 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		// Check for deny.
 		if result.Decision == keep.Deny {
 			p.logDebug("request denied", "rule", result.Rule, "message", result.Message)
+			if p.verbose != nil {
+				p.verbose.RequestDenied(result.Rule, result.Message)
+			}
 			writePolicyDeny(w, result.Rule, result.Message)
 			return
 		}
@@ -217,6 +231,15 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeInternalError(w, "failed to marshal patched request")
 			return
+		}
+	}
+
+	// Verbose: log post-policy request.
+	if p.verbose != nil {
+		if hasRedaction {
+			p.verbose.RequestAfterPolicy(forwardBody, strings.Join(redactedRules, ", "))
+		} else {
+			p.verbose.RequestAllowed()
 		}
 	}
 
@@ -259,6 +282,11 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Verbose: log raw response.
+	if p.verbose != nil {
+		p.verbose.ResponseRaw(respBody)
+	}
+
 	// 9. Parse as MessagesResponse.
 	var resp anthropic.MessagesResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
@@ -295,6 +323,9 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		// 12. Check for deny.
 		if result.Decision == keep.Deny {
 			p.logDebug("response denied", "rule", result.Rule, "message", result.Message)
+			if p.verbose != nil {
+				p.verbose.ResponseDenied(result.Rule, result.Message)
+			}
 			writePolicyDeny(w, result.Rule, result.Message)
 			return
 		}
@@ -320,6 +351,15 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			writeInternalError(w, "failed to marshal patched response")
 			return
+		}
+	}
+
+	// Verbose: log post-policy response.
+	if p.verbose != nil {
+		if respHasRedaction {
+			p.verbose.ResponseAfterPolicy(finalBody, "")
+		} else {
+			p.verbose.ResponseAllowed()
 		}
 	}
 
@@ -411,6 +451,12 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 		return
 	}
 
+	// Verbose: log reassembled response.
+	if p.verbose != nil {
+		assembled, _ := json.Marshal(resp)
+		p.verbose.ResponseRaw(assembled)
+	}
+
 	// 5. Decompose and evaluate response policy.
 	respCalls := anthropic.DecomposeResponse(resp, p.scope, p.decompose)
 
@@ -435,6 +481,9 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 
 		if result.Decision == keep.Deny {
 			p.logDebug("response denied", "rule", result.Rule, "message", result.Message)
+			if p.verbose != nil {
+				p.verbose.ResponseDenied(result.Rule, result.Message)
+			}
 			writePolicyDeny(w, result.Rule, result.Message)
 			return
 		}
@@ -459,6 +508,16 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 		outEvents = anthropic.SynthesizeEvents(patched)
 	} else {
 		outEvents = events
+	}
+
+	// Verbose: log post-policy response.
+	if p.verbose != nil {
+		if respHasRedaction {
+			assembled, _ := json.Marshal(anthropic.ReassembleResponse(resp, respBlockResults))
+			p.verbose.ResponseAfterPolicy(assembled, "")
+		} else {
+			p.verbose.ResponseAllowed()
+		}
 	}
 
 	// 7. Stream events to client.
