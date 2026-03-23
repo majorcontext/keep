@@ -374,11 +374,8 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 	}
 
 	// Compute paramsSummary after mutations so redacted values are reflected.
+	// celParams is already fully mutated from the redact loop above.
 	summary := paramsSummary(celParams)
-	if len(mutations) > 0 {
-		mutatedParams := redact.ApplyMutations(celParams, mutations)
-		summary = paramsSummary(mutatedParams)
-	}
 
 	// Build safe redact summary (path + replaced text, never the original).
 	var redactSummary []RedactedField
@@ -387,6 +384,12 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 			Path:     m.Path,
 			Replaced: m.Replaced,
 		})
+	}
+
+	// Clear Original from mutations before returning to prevent leaking
+	// pre-redaction secrets through the public API.
+	for i := range returnMutations {
+		returnMutations[i].Original = ""
 	}
 
 	return EvalResult{

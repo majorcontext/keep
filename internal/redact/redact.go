@@ -15,7 +15,7 @@ type Mutation struct {
 	// purposes but MUST NOT be returned to the calling agent or exposed
 	// externally. Callers should strip this field before serializing
 	// the result outside the engine.
-	Original string
+	Original string `json:"-"`
 	Replaced string
 }
 
@@ -109,13 +109,12 @@ func ApplyMutations(params map[string]any, mutations []Mutation) map[string]any 
 
 // pathKeys strips the leading "params." prefix from target and splits on ".".
 func pathKeys(target string) []string {
+	if !strings.HasPrefix(target, "params.") {
+		return nil
+	}
 	t := strings.TrimPrefix(target, "params.")
-	if t == "" || t == target {
-		// Either empty after strip, or no "params." prefix existed; treat as-is
-		// but only if something remains.
-		if t == "" {
-			return nil
-		}
+	if t == "" {
+		return nil
 	}
 	return strings.Split(t, ".")
 }
