@@ -87,8 +87,6 @@ func parseLine(line string) (field, value string) {
 	}
 	field = line[:i]
 	value = line[i+1:]
-	if strings.HasPrefix(value, " ") {
-		value = value[1:]
-	}
+	value = strings.TrimPrefix(value, " ")
 	return field, value
 }

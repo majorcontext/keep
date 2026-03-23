@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 )
 
 // MessagesRequest is the Anthropic /v1/messages request body.
@@ -53,12 +54,13 @@ func (b *ContentBlock) ToolResultContent() string {
 		return v
 	default:
 		blocks := toContentBlocks(b.Content)
+		var parts []string
 		for _, blk := range blocks {
 			if blk.Type == "text" {
-				return blk.Text
+				parts = append(parts, blk.Text)
 			}
 		}
-		return ""
+		return strings.Join(parts, "\n")
 	}
 }
 

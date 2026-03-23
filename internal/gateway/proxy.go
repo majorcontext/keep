@@ -3,6 +3,7 @@ package gateway
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -133,9 +134,22 @@ func writeInternalError(w http.ResponseWriter, msg string) {
 
 // handleMessages processes /v1/messages requests with bidirectional policy evaluation.
 func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
-	// 1. Read request body.
+	// 1. Read request body (with size limit to prevent memory exhaustion).
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBodySize))
 	if err != nil {
+		var maxErr *http.MaxBytesError
+		if errors.As(err, &maxErr) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusRequestEntityTooLarge)
+			_ = json.NewEncoder(w).Encode(policyError{
+				Type: "error",
+				Error: policyInner{
+					Type:    "request_too_large",
+					Message: fmt.Sprintf("Request body exceeds maximum allowed size of %d bytes", maxRequestBodySize),
+				},
+			})
+			return
+		}
 		writeInternalError(w, "failed to read request body")
 		return
 	}
@@ -265,7 +279,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		writeInternalError(w, "upstream request failed")
 		return
 	}
-	defer upstreamResp.Body.Close()
+	defer func() { _ = upstreamResp.Body.Close() }()
 
 	// 8. Read response body.
 	respBody, err := io.ReadAll(io.LimitReader(upstreamResp.Body, maxResponseBodySize))
@@ -306,6 +320,9 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		respSummaryOffset = 1
 	}
 
+	// Build response block index mapping using WalkResponseBlocks (same order as DecomposeResponse).
+	respBlockMap := anthropic.WalkResponseBlocks(&resp, p.decompose)
+
 	var respBlockResults []anthropic.BlockResult
 	respHasRedaction := false
 
@@ -331,11 +348,12 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if i >= respSummaryOffset {
+			blockIdx := i - respSummaryOffset
 			if result.Decision == keep.Redact {
 				respHasRedaction = true
 			}
 			respBlockResults = append(respBlockResults, anthropic.BlockResult{
-				BlockIndex: i - respSummaryOffset,
+				BlockIndex: respBlockMap[blockIdx].BlockIndex,
 				Result:     result,
 			})
 		}
@@ -410,7 +428,7 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 		writeInternalError(w, "upstream request failed")
 		return
 	}
-	defer upstreamResp.Body.Close()
+	defer func() { _ = upstreamResp.Body.Close() }()
 
 	// 2. If upstream returned non-2xx, pass through as-is.
 	if upstreamResp.StatusCode < 200 || upstreamResp.StatusCode >= 300 {
@@ -465,6 +483,9 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 		respSummaryOffset = 1
 	}
 
+	// Build response block index mapping using WalkResponseBlocks (same order as DecomposeResponse).
+	respBlockMap := anthropic.WalkResponseBlocks(resp, p.decompose)
+
 	var respBlockResults []anthropic.BlockResult
 	respHasRedaction := false
 
@@ -489,11 +510,12 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 		}
 
 		if i >= respSummaryOffset {
+			blockIdx := i - respSummaryOffset
 			if result.Decision == keep.Redact {
 				respHasRedaction = true
 			}
 			respBlockResults = append(respBlockResults, anthropic.BlockResult{
-				BlockIndex: i - respSummaryOffset,
+				BlockIndex: respBlockMap[blockIdx].BlockIndex,
 				Result:     result,
 			})
 		}

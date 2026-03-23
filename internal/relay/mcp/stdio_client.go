@@ -12,15 +12,28 @@ import (
 	"sync/atomic"
 )
 
+// lockedWriter wraps a writer with a mutex so concurrent writes are safe.
+type lockedWriter struct {
+	mu  *sync.Mutex
+	buf *bytes.Buffer
+}
+
+func (w *lockedWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.buf.Write(p)
+}
+
 // StdioClient is an MCP client that communicates with a subprocess over stdio
 // using newline-delimited JSON-RPC.
 type StdioClient struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	scanner *bufio.Scanner
-	mu      sync.Mutex
-	nextID  atomic.Int32
-	stderr  *bytes.Buffer
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	scanner  *bufio.Scanner
+	mu       sync.Mutex
+	nextID   atomic.Int32
+	stderr   *bytes.Buffer
+	stderrMu *sync.Mutex
 }
 
 // NewStdioClient creates a new StdioClient that spawns the given command.
@@ -39,7 +52,8 @@ func NewStdioClient(name string, args ...string) (*StdioClient, error) {
 	}
 
 	var stderr bytes.Buffer
-	cmd.Stderr = &stderr
+	var stderrMu sync.Mutex
+	cmd.Stderr = &lockedWriter{mu: &stderrMu, buf: &stderr}
 
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 0, 1024*1024), 1024*1024) // 1MB buffer
@@ -49,10 +63,11 @@ func NewStdioClient(name string, args ...string) (*StdioClient, error) {
 	}
 
 	return &StdioClient{
-		cmd:     cmd,
-		stdin:   stdin,
-		scanner: scanner,
-		stderr:  &stderr,
+		cmd:      cmd,
+		stdin:    stdin,
+		scanner:  scanner,
+		stderr:   &stderr,
+		stderrMu: &stderrMu,
 	}, nil
 }
 
@@ -209,12 +224,16 @@ func (c *StdioClient) CallTool(ctx context.Context, name string, args map[string
 // Close shuts down the subprocess by closing stdin and killing the process.
 func (c *StdioClient) Close() error {
 	_ = c.stdin.Close()
-	return c.cmd.Process.Kill()
+	err := c.cmd.Process.Kill()
+	_ = c.cmd.Wait() // reap the process to avoid zombies; error is expected
+	return err
 }
 
 // stderrSnippet returns the last portion of stderr output for error messages.
 func (c *StdioClient) stderrSnippet() string {
+	c.stderrMu.Lock()
 	s := c.stderr.String()
+	c.stderrMu.Unlock()
 	if len(s) > 256 {
 		s = s[len(s)-256:]
 	}

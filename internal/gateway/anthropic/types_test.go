@@ -243,6 +243,20 @@ func TestContentBlock_ToolResultContent_Array(t *testing.T) {
 	}
 }
 
+func TestContentBlock_ToolResultContent_MultipleTextBlocks(t *testing.T) {
+	// Simulate JSON unmarshal: Content has multiple text blocks that should be joined.
+	raw := `{"type":"tool_result","tool_use_id":"tu_1","content":[{"type":"text","text":"line one"},{"type":"text","text":"line two"},{"type":"text","text":"line three"}]}`
+	var b ContentBlock
+	if err := json.Unmarshal([]byte(raw), &b); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	got := b.ToolResultContent()
+	want := "line one\nline two\nline three"
+	if got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
 func TestMessagesRequest_Marshal(t *testing.T) {
 	var req MessagesRequest
 	if err := json.Unmarshal([]byte(realisticRequest), &req); err != nil {

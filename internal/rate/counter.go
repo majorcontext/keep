@@ -93,6 +93,9 @@ func (s *Store) Count(key string, window time.Duration) int {
 // Runs every interval, removing entries older than maxAge.
 // Call StopGC to stop the goroutine.
 func (s *Store) StartGC(interval, maxAge time.Duration) {
+	if s.stopCh != nil {
+		return // already running
+	}
 	s.stopCh = make(chan struct{})
 	go func() {
 		ticker := time.NewTicker(interval)
