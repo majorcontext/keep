@@ -246,6 +246,127 @@ func TestHandler_UpstreamError(t *testing.T) {
 	}
 }
 
+// mockUpstreamWithFixedResponse starts a mock MCP server that returns a fixed
+// ToolCallResult for every tools/call request.
+func mockUpstreamWithFixedResponse(t *testing.T, tools []mcp.Tool, fixedResult mcp.ToolCallResult) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req mcp.JSONRPCRequest
+		json.NewDecoder(r.Body).Decode(&req)
+
+		var resp mcp.JSONRPCResponse
+		resp.JSONRPC = "2.0"
+		resp.ID = req.ID
+
+		switch req.Method {
+		case "initialize":
+			resp.Result = mcp.InitializeResult{
+				ProtocolVersion: "2025-03-26",
+				Capabilities:    mcp.ServerCapabilities{Tools: &mcp.ToolsCapability{}},
+			}
+		case "tools/list":
+			resp.Result = mcp.ListToolsResult{Tools: tools}
+		case "tools/call":
+			resp.Result = fixedResult
+		}
+
+		json.NewEncoder(w).Encode(resp)
+	}))
+}
+
+// TestHandler_ResponseRedact verifies that response content containing
+// passwords is redacted by response-side policy rules.
+func TestHandler_ResponseRedact(t *testing.T) {
+	tools := []mcp.Tool{
+		{Name: "read_query", Description: "Runs a read query"},
+		{Name: "write_query", Description: "Runs a write query"},
+	}
+
+	responseContent := `[{"id":1,"name":"Alice","password":"hunter2"},{"id":2,"name":"Bob","password":"p@ssw0rd!"}]`
+	fixedResult := mcp.ToolCallResult{
+		Content: []mcp.ContentBlock{{Type: "text", Text: responseContent}},
+	}
+
+	srv := mockUpstreamWithFixedResponse(t, tools, fixedResult)
+	t.Cleanup(srv.Close)
+
+	engine, err := keep.Load("testdata/rules")
+	if err != nil {
+		t.Fatalf("keep.Load: %v", err)
+	}
+	t.Cleanup(engine.Close)
+
+	routes := []relayconfig.Route{
+		{Scope: "test-response-scope", Upstream: srv.URL},
+	}
+	router, err := NewRouter(context.Background(), routes)
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+
+	var buf bytes.Buffer
+	logger := audit.NewLogger(&buf)
+	handler := NewRelayHandler(engine, router, logger)
+
+	result, err := handler.HandleToolCall(context.Background(), "read_query", map[string]any{"sql": "SELECT * FROM users"})
+	if err != nil {
+		t.Fatalf("HandleToolCall: unexpected error: %v", err)
+	}
+	if result == nil || len(result.Content) == 0 {
+		t.Fatal("HandleToolCall: expected non-empty result")
+	}
+
+	text := result.Content[0].Text
+	if strings.Contains(text, "hunter2") {
+		t.Errorf("response should not contain 'hunter2', got: %s", text)
+	}
+	if strings.Contains(text, "p@ssw0rd!") {
+		t.Errorf("response should not contain 'p@ssw0rd!', got: %s", text)
+	}
+	if !strings.Contains(text, "********") {
+		t.Errorf("response should contain redaction marker '********', got: %s", text)
+	}
+}
+
+// TestHandler_ResponseDeny verifies that write_query is denied on the request
+// side (the block-writes rule has no direction guard).
+func TestHandler_ResponseDeny(t *testing.T) {
+	tools := []mcp.Tool{
+		{Name: "read_query", Description: "Runs a read query"},
+		{Name: "write_query", Description: "Runs a write query"},
+	}
+
+	srv := mockUpstreamWithEcho(t, tools)
+	t.Cleanup(srv.Close)
+
+	engine, err := keep.Load("testdata/rules")
+	if err != nil {
+		t.Fatalf("keep.Load: %v", err)
+	}
+	t.Cleanup(engine.Close)
+
+	routes := []relayconfig.Route{
+		{Scope: "test-response-scope", Upstream: srv.URL},
+	}
+	router, err := NewRouter(context.Background(), routes)
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+
+	handler := NewRelayHandler(engine, router, nil)
+
+	result, err := handler.HandleToolCall(context.Background(), "write_query", map[string]any{"sql": "DROP TABLE users"})
+	if err == nil {
+		t.Fatal("HandleToolCall: expected error for denied write_query, got nil")
+	}
+	if result != nil {
+		t.Errorf("HandleToolCall: expected nil result on deny, got %+v", result)
+	}
+	if !strings.Contains(err.Error(), "read-only") {
+		t.Errorf("error should mention 'read-only', got: %v", err)
+	}
+}
+
 // TestHandler_AuditLogged verifies that after a tool call the audit logger
 // buffer contains at least one JSON line with the evaluation decision.
 func TestHandler_AuditLogged(t *testing.T) {
@@ -253,17 +374,21 @@ func TestHandler_AuditLogged(t *testing.T) {
 
 	_, _ = handler.HandleToolCall(context.Background(), "allowed_tool", map[string]any{})
 
-	line := buf.String()
-	if line == "" {
+	raw := buf.String()
+	if raw == "" {
 		t.Fatal("audit buffer is empty; expected a JSON audit entry")
 	}
 
-	// The line should be valid JSON and contain a "Decision" field.
-	var entry map[string]any
-	if err := json.Unmarshal([]byte(strings.TrimSpace(line)), &entry); err != nil {
-		t.Fatalf("audit entry is not valid JSON: %v\nraw: %s", err, line)
-	}
-	if _, ok := entry["Decision"]; !ok {
-		t.Errorf("audit entry missing 'Decision' field; got keys: %v", entry)
+	// There may be multiple JSON lines (request + response evaluation).
+	// Verify at least one is valid JSON with a "Decision" field.
+	lines := strings.Split(strings.TrimSpace(raw), "\n")
+	for _, line := range lines {
+		var entry map[string]any
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			t.Fatalf("audit entry is not valid JSON: %v\nraw: %s", err, line)
+		}
+		if _, ok := entry["Decision"]; !ok {
+			t.Errorf("audit entry missing 'Decision' field; got keys: %v", entry)
+		}
 	}
 }
