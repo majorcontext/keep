@@ -25,7 +25,7 @@ rules:
   - name: redact-response-text-secrets
     match:
       operation: "llm.text"
-      when: "params.text.contains('SECRET_')"
+      when: "params.text.contains('secret_')"
     action: redact
     redact:
       target: "params.text"

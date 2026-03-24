@@ -176,6 +176,17 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 		"labels":    call.Context.Labels,
 	}
 
+	// Preserve originals for secret detection, redaction, and audit trail.
+	originalParams := call.Params
+	normalizedOp := call.Operation
+
+	// Normalize strings for case-insensitive matching (default behavior).
+	if !ev.caseSensitive {
+		celParams = deepLowerStrings(celParams)
+		celCtx = lowerContext(celCtx)
+		normalizedOp = strings.ToLower(call.Operation)
+	}
+
 	// NOTE: audit_only mode prevents enforcement of deny/redact decisions but
 	// does NOT suppress side effects in CEL functions (e.g., rateCount still
 	// increments counters). This is a known limitation.
@@ -194,8 +205,8 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 	var firstRedactRule string
 
 	for _, cr := range ev.rules {
-		// Check operation glob.
-		if !GlobMatch(cr.rule.Match.Operation, call.Operation) {
+		// Check operation glob using normalized operation name.
+		if !GlobMatch(cr.rule.Match.Operation, normalizedOp) {
 			rulesEvaluated = append(rulesEvaluated, RuleResult{
 				Name:    cr.rule.Name,
 				Skipped: true,
@@ -302,10 +313,11 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 		case config.ActionRedact:
 			if cr.rule.Redact != nil && !auditOnly {
 				// Run gitleaks secret detection first if enabled.
+				// Uses originalParams for pattern matching (secret patterns are case-sensitive).
 				if cr.rule.Redact.Secrets && ev.secrets != nil {
 					target := cr.rule.Redact.Target
 					keys := strings.Split(strings.TrimPrefix(target, "params."), ".")
-					if val := getNestedString(celParams, keys); val != "" {
+					if val := getNestedString(originalParams, keys); val != "" {
 						redacted, findings := ev.secrets.Redact(val)
 						if len(findings) > 0 {
 							sm := []redact.Mutation{{
@@ -317,19 +329,22 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 								firstRedactRule = cr.rule.Name
 							}
 							celParams = redact.ApplyMutations(celParams, sm)
+							originalParams = redact.ApplyMutations(originalParams, sm)
 							mutations = append(mutations, sm...)
 						}
 					}
 				}
 				// Then run custom regex patterns on the (possibly already-redacted) text.
-				m := redact.Apply(celParams, cr.rule.Redact.Target, cr.patterns)
+				// Uses originalParams for pattern matching (regex patterns are case-sensitive).
+				m := redact.Apply(originalParams, cr.rule.Redact.Target, cr.patterns)
 				if len(m) > 0 {
 					if firstRedactRule == "" {
 						firstRedactRule = cr.rule.Name
 					}
-					// Apply mutations to the working params so subsequent
+					// Apply mutations to both params maps so subsequent
 					// redact rules see the already-redacted values.
 					celParams = redact.ApplyMutations(celParams, m)
+					originalParams = redact.ApplyMutations(originalParams, m)
 					mutations = append(mutations, m...)
 				}
 			}
@@ -376,9 +391,9 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 		returnMutations = nil
 	}
 
-	// Compute paramsSummary after mutations so redacted values are reflected.
-	// celParams is already fully mutated from the redact loop above.
-	summary := paramsSummary(celParams)
+	// Compute paramsSummary from originalParams after mutations so redacted
+	// values are reflected but original casing is preserved for forensics.
+	summary := paramsSummary(originalParams)
 
 	// Build safe redact summary (path + replaced text, never the original).
 	var redactSummary []RedactedField

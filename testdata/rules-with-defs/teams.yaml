@@ -2,7 +2,7 @@ scope: test-defs
 mode: enforce
 
 defs:
-  allowed_teams: "['TEAM-ENG', 'TEAM-INFRA']"
+  allowed_teams: "['team-eng', 'team-infra']"
   max_priority: "1"
   agent_prefix: "'agent/'"
 
