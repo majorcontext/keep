@@ -10,8 +10,26 @@ For design rationale and principles, see [VISION.md](VISION.md).
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew install majorcontext/tap/keep
+```
+
+This installs three binaries:
+
+| Binary | Purpose |
+|--------|---------|
+| `keep` | CLI for validating and testing policy rules |
+| `keep-mcp-relay` | MCP proxy that enforces policy on tool calls to upstream MCP servers |
+| `keep-llm-gateway` | HTTP proxy that enforces policy between your agent and an LLM provider |
+
+### From source
+
 ```bash
 go install github.com/majorcontext/keep/cmd/keep@latest
+go install github.com/majorcontext/keep/cmd/keep-mcp-relay@latest
+go install github.com/majorcontext/keep/cmd/keep-llm-gateway@latest
 ```
 
 **Requirements:** Go 1.25+.
