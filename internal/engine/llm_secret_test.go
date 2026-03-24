@@ -35,7 +35,7 @@ func makeLLMSecretEvaluator(t *testing.T) *Evaluator {
 			Redact: &config.RedactSpec{Target: "params.content", Secrets: true},
 		},
 	}
-	ev, err := NewEvaluator(env, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, detector)
+	ev, err := NewEvaluator(env, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, detector, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -176,7 +176,7 @@ func TestLLMSecret_AuditTrail_DenyIncludesRule(t *testing.T) {
 	defs := map[string]string{
 		"network_commands": "['curl ', 'wget ']",
 	}
-	ev, err := NewEvaluator(env, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, defs, nil)
+	ev, err := NewEvaluator(env, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, defs, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

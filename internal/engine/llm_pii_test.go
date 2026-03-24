@@ -28,7 +28,7 @@ func makeLLMPIIEvaluator(t *testing.T) *Evaluator {
 	defs := map[string]string{
 		"email_pattern": "'[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\\\.[a-zA-Z]{2,}'",
 	}
-	ev, err := NewEvaluator(env, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, defs, nil)
+	ev, err := NewEvaluator(env, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, defs, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

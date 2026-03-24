@@ -26,7 +26,7 @@ func makeMCPReadOnlyEvaluator(t *testing.T) *Evaluator {
 			Message: "Database is read-only.",
 		},
 	}
-	ev, err := NewEvaluator(env, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil)
+	ev, err := NewEvaluator(env, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func makeMCPResponseRedactEvaluator(t *testing.T) *Evaluator {
 			},
 		},
 	}
-	ev, err := NewEvaluator(env, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil)
+	ev, err := NewEvaluator(env, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,13 +3,14 @@ package config
 
 // RuleFile is the parsed representation of a single YAML rule file.
 type RuleFile struct {
-	Scope   string            `yaml:"scope"`
-	Profile string            `yaml:"profile,omitempty"`
-	Mode    Mode              `yaml:"mode,omitempty"`
-	OnError ErrorMode         `yaml:"on_error,omitempty"`
-	Defs    map[string]string `yaml:"defs,omitempty"`
-	Packs   []PackRef         `yaml:"packs,omitempty"`
-	Rules   []Rule            `yaml:"rules"`
+	Scope         string            `yaml:"scope"`
+	Profile       string            `yaml:"profile,omitempty"`
+	Mode          Mode              `yaml:"mode,omitempty"`
+	OnError       ErrorMode         `yaml:"on_error,omitempty"`
+	CaseSensitive bool              `yaml:"case_sensitive,omitempty"`
+	Defs          map[string]string `yaml:"defs,omitempty"`
+	Packs         []PackRef         `yaml:"packs,omitempty"`
+	Rules         []Rule            `yaml:"rules"`
 }
 
 // Mode controls whether rules are enforced or only audited.

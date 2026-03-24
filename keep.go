@@ -198,7 +198,7 @@ func buildEvaluators(lr *config.LoadResult, celEnv *keepcel.Env, cfg engineConfi
 			onError = config.ErrorModeClosed // default
 		}
 
-		ev, err := engine.NewEvaluator(celEnv, scopeName, mode, onError, rules, aliases, rf.Defs, detector)
+		ev, err := engine.NewEvaluator(celEnv, scopeName, mode, onError, rules, aliases, rf.Defs, detector, rf.CaseSensitive)
 		if err != nil {
 			return nil, fmt.Errorf("keep: compile scope %q: %w", scopeName, err)
 		}

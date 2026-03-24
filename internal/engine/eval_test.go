@@ -10,12 +10,16 @@ import (
 )
 
 func makeEvaluator(t *testing.T, rules []config.Rule) *Evaluator {
+	return makeEvaluatorWithOpts(t, rules, false)
+}
+
+func makeEvaluatorWithOpts(t *testing.T, rules []config.Rule, caseSensitive bool) *Evaluator {
 	t.Helper()
 	env, err := keepcel.NewEnv()
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev, err := NewEvaluator(env, "test-scope", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil)
+	ev, err := NewEvaluator(env, "test-scope", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, caseSensitive)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -386,7 +390,7 @@ func makeEvaluatorWithDefs(t *testing.T, rules []config.Rule, defs map[string]st
 	if err != nil {
 		t.Fatal(err)
 	}
-	ev, err := NewEvaluator(env, "test-scope", config.ModeEnforce, config.ErrorModeClosed, rules, nil, defs, nil)
+	ev, err := NewEvaluator(env, "test-scope", config.ModeEnforce, config.ErrorModeClosed, rules, nil, defs, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -496,7 +500,7 @@ func TestEval_RedactSecrets(t *testing.T) {
 			},
 		},
 	}
-	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, det)
+	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, det, false)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -530,7 +534,7 @@ func TestEval_HasSecretsInWhen(t *testing.T) {
 			Message: "secrets detected",
 		},
 	}
-	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, det)
+	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, det, false)
 	if err != nil {
 		t.Fatal(err)
 	}

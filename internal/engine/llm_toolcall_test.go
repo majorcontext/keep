@@ -39,7 +39,7 @@ func makeLLMToolCallEvaluator(t *testing.T) *Evaluator {
 		"network_commands":     "['curl ', 'wget ', 'nc ', 'ssh ', 'ncat ']",
 		"destructive_patterns": "['rm -rf', 'drop table', 'truncate', 'mkfs']",
 	}
-	ev, err := NewEvaluator(env, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, defs, nil)
+	ev, err := NewEvaluator(env, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, defs, nil, false)
 	if err != nil {
 		t.Fatal(err)
 	}

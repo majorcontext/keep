@@ -93,11 +93,12 @@ type compiledRule struct {
 
 // Evaluator runs the rule evaluation loop for a single scope.
 type Evaluator struct {
-	rules   []compiledRule
-	mode    config.Mode
-	onError config.ErrorMode
-	scope   string
-	secrets *secrets.Detector
+	rules         []compiledRule
+	mode          config.Mode
+	onError       config.ErrorMode
+	scope         string
+	secrets       *secrets.Detector
+	caseSensitive bool
 }
 
 // NewEvaluator creates an evaluator for a scope. Compiles all CEL expressions
@@ -112,6 +113,7 @@ func NewEvaluator(
 	aliases map[string]string,
 	defs map[string]string,
 	detector *secrets.Detector,
+	caseSensitive bool,
 ) (*Evaluator, error) {
 	compiled := make([]compiledRule, 0, len(rules))
 	for _, r := range rules {
@@ -153,11 +155,12 @@ func NewEvaluator(
 	})
 
 	return &Evaluator{
-		rules:   compiled,
-		mode:    mode,
-		onError: onError,
-		scope:   scope,
-		secrets: detector,
+		rules:         compiled,
+		mode:          mode,
+		onError:       onError,
+		scope:         scope,
+		secrets:       detector,
+		caseSensitive: caseSensitive,
 	}, nil
 }
 
