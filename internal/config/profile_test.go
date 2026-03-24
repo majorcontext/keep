@@ -151,4 +151,3 @@ func writeProfileFile(t *testing.T, dir, name, content string) {
 		t.Fatalf("writeProfileFile: %v", err)
 	}
 }
-

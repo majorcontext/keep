@@ -11,14 +11,14 @@ import (
 
 // GatewayConfig holds the top-level gateway configuration.
 type GatewayConfig struct {
-	Listen      string          `yaml:"listen"`
-	RulesDir    string          `yaml:"rules_dir"`
-	ProfilesDir string          `yaml:"profiles_dir,omitempty"`
-	PacksDir    string          `yaml:"packs_dir,omitempty"`
-	Provider    string          `yaml:"provider"`
-	Upstream    string          `yaml:"upstream"`
-	Scope       string          `yaml:"scope"`
-	Decompose   DecomposeConfig `yaml:"decompose,omitempty"`
+	Listen      string               `yaml:"listen"`
+	RulesDir    string               `yaml:"rules_dir"`
+	ProfilesDir string               `yaml:"profiles_dir,omitempty"`
+	PacksDir    string               `yaml:"packs_dir,omitempty"`
+	Provider    string               `yaml:"provider"`
+	Upstream    string               `yaml:"upstream"`
+	Scope       string               `yaml:"scope"`
+	Decompose   DecomposeConfig      `yaml:"decompose,omitempty"`
 	Log         keepconfig.LogConfig `yaml:"log,omitempty"`
 }
 

@@ -47,8 +47,8 @@ func main() {
 		case "initialize":
 			writeResponse(req.ID, map[string]any{
 				"protocolVersion": "2025-03-26",
-				"capabilities":   map[string]any{"tools": map[string]any{}},
-				"serverInfo":     map[string]any{"name": "mock-noisy", "version": "0.1.0"},
+				"capabilities":    map[string]any{"tools": map[string]any{}},
+				"serverInfo":      map[string]any{"name": "mock-noisy", "version": "0.1.0"},
 			})
 			// Send an async log notification right after initialize response.
 			writeNotification("notifications/message", map[string]any{

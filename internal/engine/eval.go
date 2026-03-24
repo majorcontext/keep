@@ -64,8 +64,8 @@ type AuditEntry struct {
 	// Enforced is true when the Decision was actually applied to the call.
 	// It is false in audit_only mode, where Decision records what would have
 	// happened but the call is allowed regardless.
-	Enforced       bool
-	RedactSummary  []RedactedField `json:",omitempty"`
+	Enforced      bool
+	RedactSummary []RedactedField `json:",omitempty"`
 }
 
 // RedactedField records what was redacted without exposing the original value.
@@ -87,7 +87,7 @@ type RuleResult struct {
 // compiledRule pairs a parsed rule with its compiled CEL program and redact patterns.
 type compiledRule struct {
 	rule     config.Rule
-	program  *keepcel.Program        // nil if no when clause
+	program  *keepcel.Program         // nil if no when clause
 	patterns []redact.CompiledPattern // nil if not redact action
 }
 

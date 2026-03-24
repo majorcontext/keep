@@ -62,4 +62,3 @@ func parseHHMM(s string) (int, error) {
 	}
 	return h*60 + m, nil
 }
-

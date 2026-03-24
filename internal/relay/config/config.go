@@ -11,11 +11,11 @@ import (
 
 // RelayConfig holds the top-level relay configuration.
 type RelayConfig struct {
-	Listen      string    `yaml:"listen"`
-	RulesDir    string    `yaml:"rules_dir"`
-	ProfilesDir string    `yaml:"profiles_dir,omitempty"`
-	PacksDir    string    `yaml:"packs_dir,omitempty"`
-	Routes      []Route   `yaml:"routes"`
+	Listen      string               `yaml:"listen"`
+	RulesDir    string               `yaml:"rules_dir"`
+	ProfilesDir string               `yaml:"profiles_dir,omitempty"`
+	PacksDir    string               `yaml:"packs_dir,omitempty"`
+	Routes      []Route              `yaml:"routes"`
 	Log         keepconfig.LogConfig `yaml:"log,omitempty"`
 }
 

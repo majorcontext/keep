@@ -281,9 +281,9 @@ func (p *Program) Eval(params map[string]any, ctx map[string]any) (bool, error) 
 	}
 
 	out, _, err := p.prog.Eval(map[string]any{
-		"params":     params,
-		"context":    ctx,
-		"now": ts,
+		"params":  params,
+		"context": ctx,
+		"now":     ts,
 	})
 	if err != nil {
 		// Treat missing field / no such key errors as false so that expressions

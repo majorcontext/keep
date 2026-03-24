@@ -486,4 +486,3 @@ func TestResolvePacks_WhenOverrideTooLong(t *testing.T) {
 		t.Errorf("expected error to mention when, got: %v", err)
 	}
 }
-

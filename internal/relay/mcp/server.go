@@ -96,7 +96,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		result, err := s.handler.HandleToolCall(r.Context(), params.Name, params.Arguments)
 		if err != nil {
 			log.Printf("mcp: tool call %q failed: %v", params.Name, err)
-		resp.Error = &JSONRPCError{Code: -32000, Message: "tool call failed"}
+			resp.Error = &JSONRPCError{Code: -32000, Message: "tool call failed"}
 			break
 		}
 		resp.Result = result

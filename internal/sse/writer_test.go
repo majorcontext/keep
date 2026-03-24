@@ -154,10 +154,10 @@ type failWriter struct {
 	header http.Header
 }
 
-func (f *failWriter) Header() http.Header        { return f.header }
-func (f *failWriter) Write([]byte) (int, error)  { return 0, errors.New("write failed") }
-func (f *failWriter) WriteHeader(int)            {}
-func (f *failWriter) Flush()                     {}
+func (f *failWriter) Header() http.Header       { return f.header }
+func (f *failWriter) Write([]byte) (int, error) { return 0, errors.New("write failed") }
+func (f *failWriter) WriteHeader(int)           {}
+func (f *failWriter) Flush()                    {}
 
 func TestRoundTrip(t *testing.T) {
 	events := []Event{

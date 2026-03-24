@@ -10,7 +10,7 @@ import (
 // MessagesRequest is the Anthropic /v1/messages request body.
 type MessagesRequest struct {
 	Model     string    `json:"model"`
-	System    any       `json:"system,omitempty"`   // string or []ContentBlock
+	System    any       `json:"system,omitempty"` // string or []ContentBlock
 	Messages  []Message `json:"messages"`
 	MaxTokens int       `json:"max_tokens"`
 	Stream    bool      `json:"stream,omitempty"`
@@ -33,14 +33,14 @@ func (m *Message) ContentBlocks() []ContentBlock {
 
 // ContentBlock represents a single content block in a message or response.
 type ContentBlock struct {
-	Type      string         `json:"type"`                    // "text", "tool_use", "tool_result", "image"
+	Type      string         `json:"type"` // "text", "tool_use", "tool_result", "image"
 	Text      string         `json:"text,omitempty"`
-	ID        string         `json:"id,omitempty"`            // tool_use ID
-	Name      string         `json:"name,omitempty"`          // tool_use name
-	Input     map[string]any `json:"input,omitempty"`         // tool_use input
-	ToolUseID string         `json:"tool_use_id,omitempty"`   // tool_result reference to tool_use ID
-	Content   any            `json:"content,omitempty"`       // tool_result content: string or []ContentBlock
-	IsError   bool           `json:"is_error,omitempty"`      // tool_result error flag
+	ID        string         `json:"id,omitempty"`          // tool_use ID
+	Name      string         `json:"name,omitempty"`        // tool_use name
+	Input     map[string]any `json:"input,omitempty"`       // tool_use input
+	ToolUseID string         `json:"tool_use_id,omitempty"` // tool_result reference to tool_use ID
+	Content   any            `json:"content,omitempty"`     // tool_result content: string or []ContentBlock
+	IsError   bool           `json:"is_error,omitempty"`    // tool_result error flag
 }
 
 // ToolResultContent returns the text content of a tool_result block.
@@ -67,8 +67,8 @@ func (b *ContentBlock) ToolResultContent() string {
 // MessagesResponse is the Anthropic /v1/messages response body.
 type MessagesResponse struct {
 	ID         string         `json:"id"`
-	Type       string         `json:"type"`        // "message"
-	Role       string         `json:"role"`        // "assistant"
+	Type       string         `json:"type"` // "message"
+	Role       string         `json:"role"` // "assistant"
 	Content    []ContentBlock `json:"content"`
 	Model      string         `json:"model"`
 	StopReason string         `json:"stop_reason"` // "end_turn", "tool_use", etc.

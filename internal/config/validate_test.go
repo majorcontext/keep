@@ -561,4 +561,3 @@ func TestValidate_DefNameHasSecrets(t *testing.T) {
 		t.Errorf("expected shadow error for hasSecrets def, got: %v", err)
 	}
 }
-
