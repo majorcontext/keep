@@ -51,5 +51,16 @@ func runValidate(cmd *cobra.Command, args []string) error {
 	scopes := eng.Scopes()
 	_, _ = fmt.Fprintf(cmd.OutOrStdout(), "OK (%d scopes, %s: 0 errors)\n",
 		len(scopes), strings.Join(scopes, ", "))
+
+	// Run lint checks for non-fatal warnings.
+	warnings, lintErr := keep.LintRules(rulesDir, profilesDir, packsDir)
+	if lintErr == nil && len(warnings) > 0 {
+		_, _ = fmt.Fprintln(cmd.ErrOrStderr())
+		_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "Warnings (%d):\n", len(warnings))
+		for _, w := range warnings {
+			_, _ = fmt.Fprintf(cmd.ErrOrStderr(), "  - %s\n", w)
+		}
+	}
+
 	return nil
 }

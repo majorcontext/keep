@@ -171,6 +171,19 @@ func ApplyMutations(params map[string]any, mutations []Mutation) map[string]any 
 	return redact.ApplyMutations(params, mutations)
 }
 
+// LintWarning is a non-fatal issue found during linting.
+type LintWarning = config.LintWarning
+
+// LintRules loads rule files from the given directory and returns lint warnings
+// without building a full engine. This is used by the validate command.
+func LintRules(rulesDir string, profilesDir string, packsDir string) ([]LintWarning, error) {
+	lr, err := config.LoadAll(rulesDir, profilesDir, packsDir)
+	if err != nil {
+		return nil, err
+	}
+	return config.LintAll(lr), nil
+}
+
 // buildEvaluators creates compiled evaluators for every scope in the load result.
 func buildEvaluators(lr *config.LoadResult, celEnv *keepcel.Env, cfg engineConfig, detector *secrets.Detector) (map[string]*engine.Evaluator, error) {
 	evaluators := make(map[string]*engine.Evaluator, len(lr.Scopes))
