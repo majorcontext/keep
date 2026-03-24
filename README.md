@@ -1,14 +1,10 @@
 # Keep
 
-> **Early Release:** This project is in active development. APIs and configuration formats may change.
+> Early Release: This project is in active development. APIs and configuration formats may change.
 
-API-level policy engine for AI agents. Evaluate structured API calls against declarative rules -- deny, redact, or log.
+Policy engine for AI agent tool calls. Define declarative rules that deny, redact, or log structured API calls before they reach upstream services.
 
-```bash
-keep-mcp-relay --config keep-mcp-relay.yaml
-```
-
-This starts the MCP relay with your rules loaded. Agents connect to one endpoint. Every tool call is evaluated against your policy before reaching the upstream MCP server.
+Keep ships as a library for embedding in your own tooling, an LLM gateway for Claude Code, and an MCP relay. In each mode, agents connect to a single endpoint and every call is evaluated against your policy before it's forwarded.
 
 For design rationale and principles, see [VISION.md](VISION.md).
 
