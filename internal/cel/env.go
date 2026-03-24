@@ -17,6 +17,7 @@ import (
 // Env is Keep's configured CEL environment with custom functions.
 type Env struct {
 	env *cel.Env
+	cfg *envConfig
 }
 
 // EnvOption configures the CEL environment.
@@ -55,6 +56,10 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 		// params and context are dynamic maps: any field access works at runtime.
 		cel.Variable("params", cel.DynType),
 		cel.Variable("context", cel.DynType),
+
+		// _originalParams holds pre-normalization params for functions like hasSecrets
+		// that need original-case values. In case-sensitive mode, this equals params.
+		cel.Variable("_originalParams", cel.DynType),
 
 		// now is injected by Eval from ctx["timestamp"]; used by temporal functions.
 		cel.Variable("now", cel.TimestampType),
@@ -216,7 +221,10 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 			),
 		),
 
-		// hasSecrets(string) bool — returns true if gitleaks detects secrets
+		// hasSecrets(string) bool — returns true if gitleaks detects secrets.
+		// When case normalization is active, the string arg is lowered.
+		// The two-arg overload hasSecrets(string, dyn) uses the original params
+		// map to detect secrets with original casing.
 		cel.Function("hasSecrets",
 			cel.Overload("hasSecrets_string",
 				[]*cel.Type{cel.StringType},
@@ -233,12 +241,55 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 					return types.Bool(len(findings) > 0)
 				}),
 			),
+			// hasSecrets(loweredValue, originalParams) — uses original params for detection.
+			// The engine rewrites hasSecrets(params.X) to hasSecrets(params.X, _originalParams)
+			// when case normalization is active.
+			cel.Overload("hasSecrets_string_dyn",
+				[]*cel.Type{cel.StringType, cel.DynType},
+				cel.BoolType,
+				cel.FunctionBinding(func(args ...ref.Val) ref.Val {
+					if cfg.secretDetector == nil {
+						return types.Bool(false)
+					}
+					// The second arg is the _originalParams map.
+					// We detect secrets across all string values in it.
+					origMap, ok := args[1].Value().(map[string]any)
+					if !ok {
+						// Fallback: use the lowered string directly.
+						s, ok := args[0].(types.String)
+						if !ok {
+							return types.Bool(false)
+						}
+						findings := cfg.secretDetector.Detect(string(s))
+						return types.Bool(len(findings) > 0)
+					}
+					// Check all string values in originalParams for secrets.
+					return types.Bool(hasSecretsInMap(cfg.secretDetector, origMap))
+				}),
+			),
 		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("cel: create env: %w", err)
 	}
-	return &Env{env: env}, nil
+	return &Env{env: env, cfg: cfg}, nil
+}
+
+// hasSecretsInMap checks all string values in a map for secrets.
+func hasSecretsInMap(detector *secrets.Detector, m map[string]any) bool {
+	for _, v := range m {
+		switch val := v.(type) {
+		case string:
+			if len(detector.Detect(val)) > 0 {
+				return true
+			}
+		case map[string]any:
+			if hasSecretsInMap(detector, val) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Program is a compiled CEL expression ready for evaluation.
@@ -264,7 +315,10 @@ func (e *Env) Compile(expr string) (*Program, error) {
 // Returns the boolean result. Returns an error if evaluation fails or
 // the expression does not return a bool.
 // Missing field accesses return false rather than an error.
-func (p *Program) Eval(params map[string]any, ctx map[string]any) (bool, error) {
+//
+// originalParams is optional: when provided, it is passed as _originalParams
+// for functions like hasSecrets that need pre-normalization values.
+func (p *Program) Eval(params map[string]any, ctx map[string]any, originalParams ...map[string]any) (bool, error) {
 	if params == nil {
 		params = map[string]any{}
 	}
@@ -280,10 +334,17 @@ func (p *Program) Eval(params map[string]any, ctx map[string]any) (bool, error) 
 		}
 	}
 
+	// _originalParams defaults to params if not provided.
+	origParams := params
+	if len(originalParams) > 0 && originalParams[0] != nil {
+		origParams = originalParams[0]
+	}
+
 	out, _, err := p.prog.Eval(map[string]any{
-		"params":  params,
-		"context": ctx,
-		"now":     ts,
+		"params":          params,
+		"context":         ctx,
+		"now":             ts,
+		"_originalParams": origParams,
 	})
 	if err != nil {
 		// Treat missing field / no such key errors as false so that expressions

@@ -122,6 +122,9 @@ func NewEvaluator(
 		if r.Match.When != "" {
 			resolved := keepcel.ResolveAliases(r.Match.When, aliases)
 			resolved = keepcel.ResolveAliases(resolved, defs)
+			// Rewrite hasSecrets(x) → hasSecrets(x, _originalParams) so the
+			// binary overload receives pre-normalization values.
+			resolved = keepcel.RewriteHasSecrets(resolved)
 			prog, err := celEnv.Compile(resolved)
 			if err != nil {
 				return nil, fmt.Errorf("rule %q: compile when: %w", r.Name, err)
@@ -216,7 +219,7 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 
 		// Evaluate when clause if present.
 		if cr.program != nil {
-			matched, evalErr := evalSafe(cr.program, celParams, celCtx)
+			matched, evalErr := evalSafe(cr.program, celParams, celCtx, originalParams)
 			if evalErr != nil {
 				errMsg := evalErr.Error()
 				// In audit_only mode, always treat errors as not-matched.
@@ -433,14 +436,16 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 
 // evalSafe wraps program evaluation to recover from panics.
 // Returns the boolean result and any error.
-func evalSafe(prog *keepcel.Program, params map[string]any, ctx map[string]any) (result bool, err error) {
+// originalParams is optional: when provided, it is passed as _originalParams
+// for functions like hasSecrets that need pre-normalization values.
+func evalSafe(prog *keepcel.Program, params map[string]any, ctx map[string]any, originalParams ...map[string]any) (result bool, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			result = false
 			err = fmt.Errorf("CEL eval panic: %v", r)
 		}
 	}()
-	return prog.Eval(params, ctx)
+	return prog.Eval(params, ctx, originalParams...)
 }
 
 // operationSpecificity returns a sort key for a rule's operation pattern.

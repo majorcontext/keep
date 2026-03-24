@@ -518,7 +518,6 @@ func TestEval_RedactSecrets(t *testing.T) {
 }
 
 func TestEval_HasSecretsInWhen(t *testing.T) {
-	t.Skip("hasSecrets receives lowered input after case normalization; needs originalParams threading")
 	det, err := secrets.NewDetector()
 	if err != nil {
 		t.Fatal(err)
