@@ -1,9 +1,17 @@
 version: 2
 
+project_name: keep
+
+before:
+  hooks:
+    - go mod tidy
+
 builds:
   - id: keep
     main: ./cmd/keep
     binary: keep
+    env:
+      - CGO_ENABLED=0
     ldflags:
       - -s -w
       - -X github.com/majorcontext/keep/cmd/keep/cli.version={{.Version}}
@@ -12,7 +20,6 @@ builds:
     goos:
       - linux
       - darwin
-      - windows
     goarch:
       - amd64
       - arm64
@@ -20,12 +27,13 @@ builds:
   - id: keep-mcp-relay
     main: ./cmd/keep-mcp-relay
     binary: keep-mcp-relay
+    env:
+      - CGO_ENABLED=0
     ldflags:
       - -s -w
     goos:
       - linux
       - darwin
-      - windows
     goarch:
       - amd64
       - arm64
@@ -33,34 +41,86 @@ builds:
   - id: keep-llm-gateway
     main: ./cmd/keep-llm-gateway
     binary: keep-llm-gateway
+    env:
+      - CGO_ENABLED=0
     ldflags:
       - -s -w
     goos:
       - linux
       - darwin
-      - windows
     goarch:
       - amd64
       - arm64
 
 archives:
-  - id: default
-    format: tar.gz
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  - formats:
+      - tar.gz
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
     files:
-      - LICENSE
-      - README.md
+      - LICENSE*
+      - README*
 
 checksum:
   name_template: checksums.txt
 
 snapshot:
-  version_template: "{{ .Tag }}-next"
+  version_template: "{{ incpatch .Version }}-next"
 
 changelog:
   sort: asc
+  use: github
   filters:
     exclude:
       - "^docs:"
       - "^test:"
+      - "^ci:"
       - "^chore:"
+      - "^style:"
+  groups:
+    - title: Features
+      regexp: '^.*?feat(\([[:word:]]+\))??!?:.+$'
+      order: 0
+    - title: Bug Fixes
+      regexp: '^.*?fix(\([[:word:]]+\))??!?:.+$'
+      order: 1
+    - title: Performance
+      regexp: '^.*?perf(\([[:word:]]+\))??!?:.+$'
+      order: 2
+    - title: Refactoring
+      regexp: '^.*?refactor(\([[:word:]]+\))??!?:.+$'
+      order: 3
+    - title: Build
+      regexp: '^.*?build(\([[:word:]]+\))??!?:.+$'
+      order: 4
+    - title: Others
+      order: 999
+
+brews:
+  - name: keep
+    repository:
+      owner: majorcontext
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    directory: Formula
+    commit_author:
+      name: keep-bot
+      email: bot@majorcontext.com
+    commit_msg_template: "brew: update {{ .ProjectName }} to {{ .Tag }}"
+    homepage: "https://majorcontext.com/keep"
+    description: "Policy engine for AI agent tool calls"
+    license: "MIT"
+    test: |
+      system "#{bin}/keep", "version"
+    install: |
+      bin.install "keep"
+      bin.install "keep-mcp-relay"
+      bin.install "keep-llm-gateway"
+
+release:
+  github:
+    owner: majorcontext
+    name: keep
+  prerelease: auto
+  footer: |
+    **Full Changelog**: https://github.com/majorcontext/keep/compare/{{ .PreviousTag }}...{{ .Tag }}
