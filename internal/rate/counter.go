@@ -50,8 +50,10 @@ func NewStoreWithClock(clock Clock) *Store {
 	}
 }
 
-// OnKeyDropped sets a callback that is invoked (under lock) when a new key
-// is dropped because the store has reached maxKeys capacity.
+// OnKeyDropped sets a callback that is invoked when a new key is dropped
+// because the store has reached maxKeys capacity. The callback is called
+// outside the store lock, so it is safe to perform logging or metrics
+// collection. The callback MUST NOT call any Store methods.
 func (s *Store) OnKeyDropped(fn func(key string)) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -63,13 +65,14 @@ func (s *Store) OnKeyDropped(fn func(key string)) {
 // If a key has reached maxTimestampsPerKey, the oldest entries are trimmed.
 func (s *Store) Increment(key string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	// Enforce key limit: skip new keys when at capacity.
 	if _, exists := s.data[key]; !exists {
 		if len(s.data) >= maxKeys {
-			if s.onKeyDropped != nil {
-				s.onKeyDropped(key)
+			fn := s.onKeyDropped
+			s.mu.Unlock()
+			if fn != nil {
+				fn(key)
 			}
 			return
 		}
@@ -82,6 +85,7 @@ func (s *Store) Increment(key string) {
 		excess := len(s.data[key]) - maxTimestampsPerKey
 		s.data[key] = s.data[key][excess:]
 	}
+	s.mu.Unlock()
 }
 
 // Count returns the number of hits for key within the given window duration.

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
-	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -773,13 +772,13 @@ func TestProxy_StreamingMalformedEvents(t *testing.T) {
 
 	// ReassembleFromEvents should fail on the malformed content_block_start event,
 	// causing the proxy to return a 500 internal error.
+	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusInternalServerError {
-		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected 500, got %d: %s", resp.StatusCode, body)
 	}
 
 	var errResp policyError
-	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+	if err := json.Unmarshal(body, &errResp); err != nil {
 		t.Fatalf("decode error response: %v", err)
 	}
 	if errResp.Error.Type != "internal_error" {
@@ -860,17 +859,13 @@ func TestProxy_StreamingTooManyEvents(t *testing.T) {
 }
 
 // TestProxy_UpstreamConnectionRefused verifies that when the upstream is
-// unreachable (connection refused), the gateway returns a 500 internal error.
+// unreachable, the gateway returns a 500 internal error.
 func TestProxy_UpstreamConnectionRefused(t *testing.T) {
-	// Find a port that is not listening by binding and immediately closing.
-	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatalf("failed to find free port: %v", err)
-	}
-	deadAddr := ln.Addr().String()
-	_ = ln.Close()
-
-	p := newTestProxy(t, "http://"+deadAddr, nil)
+	// Use RFC 5737 TEST-NET-1 (192.0.2.0/24) which is non-routable,
+	// avoiding TOCTOU races from binding and immediately closing a port.
+	p := newTestProxy(t, "http://192.0.2.1:1", nil)
+	// Use a short client timeout so the test doesn't wait for a full TCP timeout.
+	p.client.Timeout = 500 * time.Millisecond
 	gw := httptest.NewServer(p)
 	defer gw.Close()
 

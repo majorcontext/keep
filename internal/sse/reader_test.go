@@ -132,6 +132,20 @@ func TestReader_Next(t *testing.T) {
 	}
 }
 
+func TestReader_MaxLineSize(t *testing.T) {
+	// Build a line that exceeds maxLineSize (1 MB).
+	bigLine := "data: " + strings.Repeat("x", maxLineSize) + "\n\n"
+	r := NewReader(strings.NewReader(bigLine))
+	_, err := r.Next()
+	if err == nil {
+		t.Fatal("expected error for oversized line, got nil")
+	}
+	// bufio.Scanner returns a generic "token too long" error.
+	if !strings.Contains(err.Error(), "too long") {
+		t.Fatalf("expected 'too long' error, got: %v", err)
+	}
+}
+
 func TestReader_ScannerError(t *testing.T) {
 	r := NewReader(&errReader{
 		data: "data: hello\n",
