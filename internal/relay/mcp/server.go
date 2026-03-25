@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"sync/atomic"
 )
 
 // Handler processes MCP tool calls.
@@ -17,7 +18,7 @@ type Server struct {
 	tools       []Tool
 	handler     Handler
 	info        ServerInfo
-	initialized bool
+	initialized atomic.Bool
 }
 
 // NewServer creates an MCP server with the given tools and handler.
@@ -68,10 +69,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			},
 			ServerInfo: s.info,
 		}
-		s.initialized = true
+		s.initialized.Store(true)
 
 	case "tools/list":
-		if !s.initialized {
+		if !s.initialized.Load() {
 			resp.Error = &JSONRPCError{Code: -32002, Message: "server not initialized"}
 			break
 		}
@@ -82,7 +83,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		resp.Result = ListToolsResult{Tools: tools}
 
 	case "tools/call":
-		if !s.initialized {
+		if !s.initialized.Load() {
 			resp.Error = &JSONRPCError{Code: -32002, Message: "server not initialized"}
 			break
 		}
