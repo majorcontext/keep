@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -89,10 +91,16 @@ func validatePack(sp *StarterPack) error {
 func ResolvePacks(rf *RuleFile, packs map[string]*StarterPack) ([]Rule, error) {
 	var merged []Rule
 
+	availableNames := make([]string, 0, len(packs))
+	for name := range packs {
+		availableNames = append(availableNames, name)
+	}
+	sort.Strings(availableNames)
+
 	for _, ref := range rf.Packs {
 		pack, ok := packs[ref.Name]
 		if !ok {
-			return nil, fmt.Errorf("resolvepacks: pack %q not found", ref.Name)
+			return nil, fmt.Errorf("resolvepacks: pack %q not found (available: %s)", ref.Name, strings.Join(availableNames, ", "))
 		}
 
 		// Copy the pack's rules to avoid mutating the original.

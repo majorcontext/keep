@@ -33,7 +33,7 @@ func NewLoggerFromOutput(output string) (*Logger, io.Closer, error) {
 	default:
 		f, err := os.OpenFile(output, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, fmt.Errorf("audit: cannot open log file %q: %w (check the path exists and is writable)", output, err)
 		}
 		return NewLogger(f), f, nil
 	}
