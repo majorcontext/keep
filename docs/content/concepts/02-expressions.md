@@ -42,7 +42,7 @@ CEL provides standard operators and methods that work without any Keep-specific 
 
 **Collection operators:** `.exists()`, `.all()`, `.filter()`, `.map()`, `.size()`. These work on lists and let you express conditions like "at least one label is in this set" without writing loops. For example, `params.labels.exists(l, l == "urgent")` checks whether any label equals `"urgent"`.
 
-**Membership:** `in` tests whether a value exists in a list. `params.team in ['TEAM-ENG', 'TEAM-INFRA']` returns true if the team is one of those values.
+**Membership:** `in` tests whether a value exists in a list. `params.team in ['team-eng', 'team-infra']` returns true if the team is one of those values.
 
 **Arithmetic:** `+`, `-`, `*`, `/`, `%` work on integers and doubles. Useful for threshold checks like `estimateTokens(params.body) > 10000`.
 
@@ -82,7 +82,7 @@ Counters are local to the process and held in memory. Multiple relay or gateway 
 
 ### String manipulation
 
-`lower` and `upper` convert strings to lowercase or uppercase. These are useful for case-insensitive comparisons where you want exact matching rather than the substring search that `containsAny` provides.
+`lower` and `upper` convert strings to lowercase or uppercase. With case-insensitive matching enabled (the default), `lower` is rarely needed since inputs are already lowered. These functions remain useful in `case_sensitive: true` scopes or for constructing normalized strings in expressions.
 
 `matchesDomain` extracts the domain from an email address and checks it against a list of allowed domains, including subdomains. `matchesDomain("user@eng.example.com", ["example.com"])` returns `true` because `eng.example.com` is a subdomain of `example.com`. This is useful for identity-based policies -- restricting operations to agents associated with specific organizational domains.
 
@@ -95,7 +95,7 @@ The `defs` field at the top of a rule file solves this. Define a named constant 
 ```yaml
 scope: linear-tools
 defs:
-  allowed_teams: "['TEAM-ENG', 'TEAM-INFRA']"
+  allowed_teams: "['team-eng', 'team-infra']"
   max_priority: "1"
 rules:
   - name: team-restriction
@@ -111,13 +111,43 @@ rules:
     action: deny
 ```
 
-Defs are text substitution. Before a `when` expression is compiled, Keep replaces unqualified identifiers that match def names with their values. In the example above, `allowed_teams` becomes `['TEAM-ENG', 'TEAM-INFRA']` and `max_priority` becomes `1`. The resulting expression is then compiled and type-checked as normal CEL.
+Defs are text substitution. Before a `when` expression is compiled, Keep replaces unqualified identifiers that match def names with their values. In the example above, `allowed_teams` becomes `['team-eng', 'team-infra']` and `max_priority` becomes `1`. The resulting expression is then compiled and type-checked as normal CEL.
 
 The substitution is scoped carefully. Field access paths like `params.allowed_teams` are not replaced -- only bare identifiers that are not preceded by a dot. String literals (both single- and double-quoted) are left untouched, so a def named `foo` inside a string like `"check foo"` is not rewritten.
 
 Def names must be lowercase with underscores (`[a-z][a-z0-9_]*`) and cannot shadow built-in variables (`params`, `context`, `now`) or Keep's custom functions. Validation catches these conflicts at load time.
 
 This is intentionally limited. Defs are constants, not macros. They do not support nesting, parameterization, or computed values. The constraint keeps rule files readable -- every `when` expression is still a valid CEL expression after substitution, and you can always understand a rule by mentally inlining the def values.
+
+## Case-insensitive matching
+
+By default, Keep normalizes all string values in `params` and `context` to lowercase before CEL evaluation. This prevents a common class of errors where rule authors write `params.name == 'bash'` but upstream sends `"Bash"` or `"BASH"`.
+
+**Rule authors should always write lowercase string literals.** The `keep validate` command warns when it detects uppercase characters in string literals within `when` expressions.
+
+```yaml
+# Correct — matches "bash", "Bash", "BASH", etc.
+when: "params.name == 'bash'"
+
+# Wrong — will never match because inputs are lowered
+when: "params.name == 'Bash'"
+```
+
+Operation names are also lowered, so glob patterns and operation literals should use lowercase.
+
+**What is preserved:** Secret detection (`hasSecrets` and `redact.secrets`) and regex redaction patterns operate on original-case values. Gitleaks patterns like `AKIA[0-9A-Z]{16}` require exact case to match, so the engine threads original params to these functions automatically. Audit trail entries also preserve original operation names and parameter values.
+
+**Opting out:** Set `case_sensitive: true` at the scope level to disable normalization entirely. In this mode, `params.name == 'Bash'` only matches exactly `"Bash"`. Use this for scopes where exact-case matching is required (e.g., credential vaults, case-sensitive file paths).
+
+```yaml
+scope: vault-tools
+case_sensitive: true
+rules:
+  - name: block-token
+    match:
+      when: "params.token == 'sk-live-abc123'"
+    action: deny
+```
 
 ## Compilation and evaluation
 

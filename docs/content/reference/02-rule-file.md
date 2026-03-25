@@ -19,6 +19,7 @@ A rule file is a YAML document that declares a scope and its rules. The engine l
 | `on_error` | `string` | No | `closed` | `closed` — deny the call when a CEL expression errors. `open` — allow the call and skip the rule on error. In `audit_only` mode, errors are always treated as not matched. |
 | `defs` | `map(string, string)` | No | — | Named constants substituted into CEL `when` expressions before compilation. |
 | `packs` | `[]PackRef` | No | — | Starter packs to import. Pack rules are evaluated before inline rules. |
+| `case_sensitive` | `bool` | No | `false` | When `false` (default), all string values in `params` and `context` are lowered before CEL evaluation. Set to `true` for exact-case matching. |
 | `rules` | `[]Rule` | Yes | — | List of rules. Max 500 per scope. Evaluated in order; deny short-circuits. |
 
 ## Rule fields
@@ -163,7 +164,7 @@ mode: enforce
 on_error: closed
 
 defs:
-  allowed_teams: '["TEAM-ENG", "TEAM-INFRA"]'
+  allowed_teams: '["team-eng", "team-infra"]'
   max_issues_per_hour: "20"
 
 packs:
