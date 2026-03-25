@@ -29,7 +29,6 @@ func InjectOriginalParams(expr string) string {
 	return expr
 }
 
-
 func injectOriginalParamsForFunc(expr string, fnName string) string {
 	prefix := fnName + "("
 	result := expr

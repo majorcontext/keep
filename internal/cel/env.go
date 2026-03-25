@@ -274,7 +274,6 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 	return &Env{env: env, cfg: cfg}, nil
 }
 
-
 // Program is a compiled CEL expression ready for evaluation.
 type Program struct {
 	prog cel.Program

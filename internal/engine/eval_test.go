@@ -726,8 +726,8 @@ func TestEval_CaseInsensitiveFullPipeline(t *testing.T) {
 		},
 		// Rule 2: redact SECRET_* patterns (regex is case-sensitive, needs original).
 		{
-			Name:  "redact-secrets",
-			Match: config.Match{Operation: "llm.tool_result"},
+			Name:   "redact-secrets",
+			Match:  config.Match{Operation: "llm.tool_result"},
 			Action: config.ActionRedact,
 			Redact: &config.RedactSpec{
 				Target: "params.content",
@@ -882,8 +882,8 @@ func TestEval_CaseInsensitiveRedactThenDeny(t *testing.T) {
 	rules := []config.Rule{
 		// Redact first (evaluated first due to operation specificity sorting).
 		{
-			Name:  "redact-token",
-			Match: config.Match{Operation: "api.call"},
+			Name:   "redact-token",
+			Match:  config.Match{Operation: "api.call"},
 			Action: config.ActionRedact,
 			Redact: &config.RedactSpec{
 				Target: "params.body",
