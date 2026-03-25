@@ -354,13 +354,15 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 		if i >= respSummaryOffset {
 			blockIdx := i - respSummaryOffset
-			if result.Decision == keep.Redact {
-				respHasRedaction = true
+			if blockIdx < len(respBlockMap) {
+				if result.Decision == keep.Redact {
+					respHasRedaction = true
+				}
+				respBlockResults = append(respBlockResults, anthropic.BlockResult{
+					BlockIndex: respBlockMap[blockIdx].BlockIndex,
+					Result:     result,
+				})
 			}
-			respBlockResults = append(respBlockResults, anthropic.BlockResult{
-				BlockIndex: respBlockMap[blockIdx].BlockIndex,
-				Result:     result,
-			})
 		}
 	}
 
@@ -521,13 +523,15 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 
 		if i >= respSummaryOffset {
 			blockIdx := i - respSummaryOffset
-			if result.Decision == keep.Redact {
-				respHasRedaction = true
+			if blockIdx < len(respBlockMap) {
+				if result.Decision == keep.Redact {
+					respHasRedaction = true
+				}
+				respBlockResults = append(respBlockResults, anthropic.BlockResult{
+					BlockIndex: respBlockMap[blockIdx].BlockIndex,
+					Result:     result,
+				})
 			}
-			respBlockResults = append(respBlockResults, anthropic.BlockResult{
-				BlockIndex: respBlockMap[blockIdx].BlockIndex,
-				Result:     result,
-			})
 		}
 	}
 
