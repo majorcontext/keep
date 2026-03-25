@@ -884,13 +884,13 @@ func TestProxy_UpstreamConnectionRefused(t *testing.T) {
 	}
 	defer func() { _ = resp.Body.Close() }()
 
+	body, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusInternalServerError {
-		body, _ := io.ReadAll(resp.Body)
 		t.Fatalf("expected 500, got %d: %s", resp.StatusCode, body)
 	}
 
 	var errResp policyError
-	if err := json.NewDecoder(resp.Body).Decode(&errResp); err != nil {
+	if err := json.Unmarshal(body, &errResp); err != nil {
 		t.Fatalf("decode error response: %v", err)
 	}
 	if errResp.Error.Type != "internal_error" {
