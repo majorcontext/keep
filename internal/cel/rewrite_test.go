@@ -2,7 +2,7 @@ package cel
 
 import "testing"
 
-func TestRewriteHasSecrets(t *testing.T) {
+func TestInjectOriginalParams(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
@@ -57,9 +57,9 @@ func TestRewriteHasSecrets(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := RewriteHasSecrets(tt.in)
+			got := InjectOriginalParams(tt.in)
 			if got != tt.want {
-				t.Errorf("RewriteHasSecrets(%q)\n  got  %q\n  want %q", tt.in, got, tt.want)
+				t.Errorf("InjectOriginalParams(%q)\n  got  %q\n  want %q", tt.in, got, tt.want)
 			}
 		})
 	}

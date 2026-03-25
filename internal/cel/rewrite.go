@@ -29,11 +29,6 @@ func InjectOriginalParams(expr string) string {
 	return expr
 }
 
-// RewriteHasSecrets is an alias for InjectOriginalParams, kept for
-// backward compatibility. Prefer InjectOriginalParams for new code.
-func RewriteHasSecrets(expr string) string {
-	return InjectOriginalParams(expr)
-}
 
 func injectOriginalParamsForFunc(expr string, fnName string) string {
 	prefix := fnName + "("

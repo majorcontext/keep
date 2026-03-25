@@ -122,9 +122,9 @@ func NewEvaluator(
 		if r.Match.When != "" {
 			resolved := keepcel.ResolveAliases(r.Match.When, aliases)
 			resolved = keepcel.ResolveAliases(resolved, defs)
-			// Rewrite hasSecrets(x) → hasSecrets(x, _originalParams) so the
-			// binary overload receives pre-normalization values.
-			resolved = keepcel.RewriteHasSecrets(resolved)
+			// Rewrite hasSecrets(params.X) → hasSecrets(params.X, _originalParams.X)
+			// so the binary overload receives the original-case field value.
+			resolved = keepcel.InjectOriginalParams(resolved)
 			prog, err := celEnv.Compile(resolved)
 			if err != nil {
 				return nil, fmt.Errorf("rule %q: compile when: %w", r.Name, err)
