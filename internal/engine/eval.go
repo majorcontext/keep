@@ -169,7 +169,6 @@ func NewEvaluator(
 
 // Evaluate runs all rules against the given call and returns the result.
 func (ev *Evaluator) Evaluate(call Call) EvalResult {
-	celParams := call.Params
 	celCtx := map[string]any{
 		"agent_id":  call.Context.AgentID,
 		"user_id":   call.Context.UserID,
@@ -179,13 +178,14 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 		"labels":    call.Context.Labels,
 	}
 
-	// Preserve originals for secret detection, redaction, and audit trail.
-	originalParams := call.Params
+	// params tracks two views: cel (lowered, for CEL matching) and original
+	// (for secret detection, redaction patterns, and audit trail).
+	params := evalParams{cel: call.Params, original: call.Params}
 	normalizedOp := call.Operation
 
 	// Normalize strings for case-insensitive matching (default behavior).
 	if !ev.caseSensitive {
-		celParams = deepLowerStrings(celParams)
+		params.cel = deepLowerStrings(params.cel)
 		celCtx = lowerContext(celCtx)
 		normalizedOp = strings.ToLower(call.Operation)
 	}
@@ -219,7 +219,7 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 
 		// Evaluate when clause if present.
 		if cr.program != nil {
-			matched, evalErr := evalSafe(cr.program, celParams, celCtx, originalParams)
+			matched, evalErr := evalSafe(cr.program, params.cel, celCtx, params.original)
 			if evalErr != nil {
 				errMsg := evalErr.Error()
 				// In audit_only mode, always treat errors as not-matched.
@@ -256,7 +256,7 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 						Rule:           cr.rule.Name,
 						Message:        msg,
 						RulesEvaluated: rulesEvaluated,
-						ParamsSummary:  paramsSummary(celParams),
+						ParamsSummary:  paramsSummary(params.cel),
 						Enforced:       true,
 					},
 				}
@@ -296,7 +296,7 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 						Rule:           cr.rule.Name,
 						Message:        cr.rule.Message,
 						RulesEvaluated: rulesEvaluated,
-						ParamsSummary:  paramsSummary(celParams),
+						ParamsSummary:  paramsSummary(params.cel),
 						Enforced:       true,
 					},
 				}
@@ -316,11 +316,11 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 		case config.ActionRedact:
 			if cr.rule.Redact != nil && !auditOnly {
 				// Run gitleaks secret detection first if enabled.
-				// Uses originalParams for pattern matching (secret patterns are case-sensitive).
+				// Uses params.original for pattern matching (secret patterns are case-sensitive).
 				if cr.rule.Redact.Secrets && ev.secrets != nil {
 					target := cr.rule.Redact.Target
 					keys := strings.Split(strings.TrimPrefix(target, "params."), ".")
-					if val := getNestedString(originalParams, keys); val != "" {
+					if val := getNestedString(params.original, keys); val != "" {
 						redacted, findings := ev.secrets.Redact(val)
 						if len(findings) > 0 {
 							sm := []redact.Mutation{{
@@ -331,23 +331,19 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 							if firstRedactRule == "" {
 								firstRedactRule = cr.rule.Name
 							}
-							celParams = redact.ApplyMutations(celParams, sm)
-							originalParams = redact.ApplyMutations(originalParams, sm)
+							params.applyMutations(sm)
 							mutations = append(mutations, sm...)
 						}
 					}
 				}
 				// Then run custom regex patterns on the (possibly already-redacted) text.
-				// Uses originalParams for pattern matching (regex patterns are case-sensitive).
-				m := redact.Apply(originalParams, cr.rule.Redact.Target, cr.patterns)
+				// Uses params.original for pattern matching (regex patterns are case-sensitive).
+				m := redact.Apply(params.original, cr.rule.Redact.Target, cr.patterns)
 				if len(m) > 0 {
 					if firstRedactRule == "" {
 						firstRedactRule = cr.rule.Name
 					}
-					// Apply mutations to both params maps so subsequent
-					// redact rules see the already-redacted values.
-					celParams = redact.ApplyMutations(celParams, m)
-					originalParams = redact.ApplyMutations(originalParams, m)
+					params.applyMutations(m)
 					mutations = append(mutations, m...)
 				}
 			}
@@ -372,7 +368,7 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 				Rule:           auditDenyRule,
 				Message:        auditDenyMessage,
 				RulesEvaluated: rulesEvaluated,
-				ParamsSummary:  paramsSummary(celParams),
+				ParamsSummary:  paramsSummary(params.cel),
 				Enforced:       false,
 			},
 		}
@@ -394,9 +390,9 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 		returnMutations = nil
 	}
 
-	// Compute paramsSummary from originalParams after mutations so redacted
+	// Compute paramsSummary from params.original after mutations so redacted
 	// values are reflected but original casing is preserved for forensics.
-	summary := paramsSummary(originalParams)
+	summary := paramsSummary(params.original)
 
 	// Build safe redact summary (path + replaced text, never the original).
 	var redactSummary []RedactedField
@@ -462,6 +458,23 @@ func operationSpecificity(pattern string) int {
 		return 1
 	}
 	return 0
+}
+
+// evalParams tracks the two views of params that exist during case-insensitive
+// evaluation: cel (lowered, for matching) and original (for redaction/audit).
+// Mutations must be applied to both maps so subsequent rules see redacted values
+// regardless of which view they use.
+type evalParams struct {
+	cel      map[string]any
+	original map[string]any
+}
+
+// applyMutations applies mutations to both the CEL and original params maps.
+// This is the ONLY way mutations should be applied during evaluation —
+// applying to one map without the other is a bug.
+func (p *evalParams) applyMutations(m []redact.Mutation) {
+	p.cel = redact.ApplyMutations(p.cel, m)
+	p.original = redact.ApplyMutations(p.original, m)
 }
 
 // getNestedString retrieves a string value from a nested map by key path.

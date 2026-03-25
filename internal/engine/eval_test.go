@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -693,5 +694,142 @@ func TestEval_CaseSensitiveScope(t *testing.T) {
 	})
 	if result.Decision != Allow {
 		t.Errorf("expected Allow for wrong operation case in case-sensitive mode, got %s", result.Decision)
+	}
+}
+
+// TestEval_CaseInsensitiveFullPipeline is an integration test that exercises
+// the entire normalization pipeline in a single evaluator:
+//   - Case-insensitive deny matching
+//   - hasSecrets detecting original-case credentials (not lowered)
+//   - Regex redaction matching original-case patterns
+//   - Audit trail preserving original values
+//
+// If any of these invariants break, it likely means the dual-map (evalParams)
+// bookkeeping or the expression rewriter has regressed.
+func TestEval_CaseInsensitiveFullPipeline(t *testing.T) {
+	det, err := secrets.NewDetector()
+	if err != nil {
+		t.Fatal(err)
+	}
+	celEnv, err := keepcel.NewEnv(keepcel.WithSecretDetector(det))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rules := []config.Rule{
+		// Rule 1: deny if hasSecrets detects a credential (needs original case).
+		{
+			Name:    "deny-secrets",
+			Match:   config.Match{Operation: "llm.text", When: "hasSecrets(params.text)"},
+			Action:  config.ActionDeny,
+			Message: "secrets detected",
+		},
+		// Rule 2: redact SECRET_* patterns (regex is case-sensitive, needs original).
+		{
+			Name:  "redact-secrets",
+			Match: config.Match{Operation: "llm.tool_result"},
+			Action: config.ActionRedact,
+			Redact: &config.RedactSpec{
+				Target: "params.content",
+				Patterns: []config.RedactPattern{
+					{Match: "SECRET_[A-Z_]+", Replace: "[REDACTED]"},
+				},
+			},
+		},
+		// Rule 3: case-insensitive deny on tool name.
+		{
+			Name:    "block-bash",
+			Match:   config.Match{Operation: "llm.tool_use", When: "params.name == 'bash'"},
+			Action:  config.ActionDeny,
+			Message: "bash blocked",
+		},
+	}
+
+	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, det, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("deny matches case-insensitively", func(t *testing.T) {
+		result := ev.Evaluate(Call{
+			Operation: "LLM.Tool_Use",
+			Params:    map[string]any{"name": "Bash"},
+			Context:   CallContext{Timestamp: time.Now()},
+		})
+		if result.Decision != Deny {
+			t.Errorf("expected Deny, got %s", result.Decision)
+		}
+		if result.Audit.Operation != "LLM.Tool_Use" {
+			t.Errorf("audit should preserve original operation, got %s", result.Audit.Operation)
+		}
+	})
+
+	t.Run("hasSecrets detects original-case AWS key", func(t *testing.T) {
+		result := ev.Evaluate(Call{
+			Operation: "llm.text",
+			Params:    map[string]any{"text": "key is AKIAIOSFODNN7REALKEY"},
+			Context:   CallContext{Timestamp: time.Now()},
+		})
+		if result.Decision != Deny {
+			t.Errorf("expected Deny (hasSecrets should detect original-case key), got %s", result.Decision)
+		}
+	})
+
+	t.Run("regex redaction matches original-case patterns", func(t *testing.T) {
+		result := ev.Evaluate(Call{
+			Operation: "llm.tool_result",
+			Params:    map[string]any{"content": "token is SECRET_API_KEY here"},
+			Context:   CallContext{Timestamp: time.Now()},
+		})
+		if result.Decision != Redact {
+			t.Fatalf("expected Redact, got %s", result.Decision)
+		}
+		if len(result.Mutations) == 0 {
+			t.Fatal("expected mutations from regex redaction")
+		}
+		// The redacted value should have replaced SECRET_API_KEY.
+		replaced := result.Mutations[0].Replaced
+		if replaced == "" {
+			t.Error("mutation Replaced should not be empty")
+		}
+		if strings.Contains(replaced, "SECRET_API_KEY") {
+			t.Errorf("redaction should have replaced SECRET_API_KEY, got %s", replaced)
+		}
+	})
+}
+
+// TestEval_CaseInsensitiveRedactThenDeny verifies that mutations applied
+// via evalParams.applyMutations are visible to both the CEL view and the
+// original view. If a redaction rule runs first and a deny rule checks the
+// same field afterwards, both views should show the redacted value.
+func TestEval_CaseInsensitiveRedactThenDeny(t *testing.T) {
+	rules := []config.Rule{
+		// Redact first (evaluated first due to operation specificity sorting).
+		{
+			Name:  "redact-token",
+			Match: config.Match{Operation: "api.call"},
+			Action: config.ActionRedact,
+			Redact: &config.RedactSpec{
+				Target: "params.body",
+				Patterns: []config.RedactPattern{
+					{Match: "token_[a-z0-9]+", Replace: "[REDACTED]"},
+				},
+			},
+		},
+	}
+
+	ev := makeEvaluatorWithOpts(t, rules, false)
+
+	result := ev.Evaluate(Call{
+		Operation: "API.Call",
+		Params:    map[string]any{"body": "auth token_abc123 here"},
+		Context:   CallContext{Timestamp: time.Now()},
+	})
+	if result.Decision != Redact {
+		t.Fatalf("expected Redact, got %s", result.Decision)
+	}
+	// Audit params summary should show redacted value (from params.original).
+	if strings.Contains(result.Audit.ParamsSummary, "token_abc123") {
+		t.Error("audit params summary should show redacted value, but found original token")
 	}
 }

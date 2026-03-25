@@ -2,24 +2,50 @@ package cel
 
 import "strings"
 
-// RewriteHasSecrets transforms hasSecrets(expr) calls into
-// hasSecrets(expr, _originalParams) so that the binary overload receives
-// the pre-normalization params map for case-sensitive secret detection.
+// originalParamsFunctions lists CEL functions that need access to
+// pre-normalization params. The rewriter injects _originalParams as a
+// second argument to single-argument calls of these functions.
 //
-// Only single-argument calls are rewritten; two-argument calls are left as-is.
-// String literals inside the call are handled correctly (parentheses inside
-// strings do not confuse the rewriter).
+// To register a new function:
+//  1. Add its name here.
+//  2. Add a binary overload in env.go that accepts (arg, dyn) and reads
+//     the _originalParams map from the second argument.
+//  3. Add a test case in rewrite_test.go.
+var originalParamsFunctions = []string{
+	"hasSecrets",
+}
+
+// InjectOriginalParams rewrites CEL expressions so that single-argument
+// calls to any function in originalParamsFunctions get _originalParams
+// injected as a second argument.
+//
+// Only single-argument calls are rewritten; calls that already have
+// multiple arguments are left as-is. String literals inside the call are
+// handled correctly (parentheses inside strings do not confuse the rewriter).
+func InjectOriginalParams(expr string) string {
+	for _, fn := range originalParamsFunctions {
+		expr = injectOriginalParamsForFunc(expr, fn)
+	}
+	return expr
+}
+
+// RewriteHasSecrets is an alias for InjectOriginalParams, kept for
+// backward compatibility. Prefer InjectOriginalParams for new code.
 func RewriteHasSecrets(expr string) string {
-	const fn = "hasSecrets("
+	return InjectOriginalParams(expr)
+}
+
+func injectOriginalParamsForFunc(expr string, fnName string) string {
+	prefix := fnName + "("
 	result := expr
 	offset := 0
 
 	for {
-		idx := strings.Index(result[offset:], fn)
+		idx := strings.Index(result[offset:], prefix)
 		if idx < 0 {
 			break
 		}
-		start := offset + idx + len(fn) // position after opening paren
+		start := offset + idx + len(prefix) // position after opening paren
 
 		// Find the matching closing paren, respecting nesting and string literals.
 		depth := 1
