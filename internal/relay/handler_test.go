@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/majorcontext/keep"
 	"github.com/majorcontext/keep/internal/audit"
@@ -243,6 +244,120 @@ func TestHandler_UpstreamError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "upstream internal error") {
 		t.Errorf("error should mention upstream error message, got: %v", err)
+	}
+}
+
+// mockUpstreamSlow starts a mock MCP server that delays responding to
+// tools/call requests for the given duration, simulating a slow upstream.
+func mockUpstreamSlow(t *testing.T, tools []mcp.Tool, delay time.Duration) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var req mcp.JSONRPCRequest
+		_ = json.NewDecoder(r.Body).Decode(&req)
+
+		var resp mcp.JSONRPCResponse
+		resp.JSONRPC = "2.0"
+		resp.ID = req.ID
+
+		switch req.Method {
+		case "initialize":
+			resp.Result = mcp.InitializeResult{
+				ProtocolVersion: "2025-03-26",
+				Capabilities:    mcp.ServerCapabilities{Tools: &mcp.ToolsCapability{}},
+			}
+		case "tools/list":
+			resp.Result = mcp.ListToolsResult{Tools: tools}
+		case "tools/call":
+			time.Sleep(delay)
+			resp.Result = mcp.ToolCallResult{
+				Content: []mcp.ContentBlock{{Type: "text", Text: "slow response"}},
+			}
+		}
+
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+}
+
+// TestHandler_UpstreamTimeout verifies that when the upstream takes longer than
+// the client context deadline, the call returns a context error.
+func TestHandler_UpstreamTimeout(t *testing.T) {
+	tools := []mcp.Tool{
+		{Name: "allowed_tool", Description: "An allowed tool"},
+	}
+	// Upstream sleeps 2s; we set a 50ms context deadline.
+	srv := mockUpstreamSlow(t, tools, 2*time.Second)
+	t.Cleanup(srv.Close)
+
+	engine, err := keep.Load("testdata/rules")
+	if err != nil {
+		t.Fatalf("keep.Load: %v", err)
+	}
+	t.Cleanup(engine.Close)
+
+	routes := []relayconfig.Route{
+		{Scope: "test-scope", Upstream: srv.URL},
+	}
+	router, err := NewRouter(context.Background(), routes)
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+
+	handler := NewRelayHandler(engine, router, nil, "")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	result, err := handler.HandleToolCall(ctx, "allowed_tool", map[string]any{})
+	if err == nil {
+		t.Fatal("HandleToolCall: expected timeout error, got nil")
+	}
+	if result != nil {
+		t.Errorf("HandleToolCall: expected nil result on timeout, got %+v", result)
+	}
+	if !strings.Contains(err.Error(), "context deadline exceeded") &&
+		!strings.Contains(err.Error(), "context canceled") {
+		t.Errorf("expected context deadline/canceled error, got: %v", err)
+	}
+}
+
+// TestHandler_UpstreamMCPError verifies that when the upstream returns a
+// JSON-RPC error response, the error message is propagated to the caller.
+func TestHandler_UpstreamMCPError(t *testing.T) {
+	tools := []mcp.Tool{
+		{Name: "allowed_tool", Description: "An allowed tool"},
+	}
+	srv := mockUpstreamError(t, tools)
+	t.Cleanup(srv.Close)
+
+	engine, err := keep.Load("testdata/rules")
+	if err != nil {
+		t.Fatalf("keep.Load: %v", err)
+	}
+	t.Cleanup(engine.Close)
+
+	routes := []relayconfig.Route{
+		{Scope: "test-scope", Upstream: srv.URL},
+	}
+	router, err := NewRouter(context.Background(), routes)
+	if err != nil {
+		t.Fatalf("NewRouter: %v", err)
+	}
+
+	handler := NewRelayHandler(engine, router, nil, "")
+
+	result, err := handler.HandleToolCall(context.Background(), "allowed_tool", map[string]any{"key": "value"})
+	if err == nil {
+		t.Fatal("HandleToolCall: expected upstream MCP error, got nil")
+	}
+	if result != nil {
+		t.Errorf("HandleToolCall: expected nil result on MCP error, got %+v", result)
+	}
+	// The mock returns code -32000 with "upstream internal error".
+	if !strings.Contains(err.Error(), "-32000") {
+		t.Errorf("error should contain RPC error code -32000, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "upstream internal error") {
+		t.Errorf("error should contain upstream error message, got: %v", err)
 	}
 }
 

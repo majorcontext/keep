@@ -63,7 +63,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch req.Method {
 	case "initialize":
 		resp.Result = InitializeResult{
-			ProtocolVersion: "2025-03-26",
+			ProtocolVersion: ProtocolVersion,
 			Capabilities: ServerCapabilities{
 				Tools: &ToolsCapability{},
 			},

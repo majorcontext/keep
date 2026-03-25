@@ -168,6 +168,36 @@ func TestStore_MaxKeys(t *testing.T) {
 	}
 }
 
+func TestStore_OnKeyDropped(t *testing.T) {
+	clk := newMockClock()
+	s := NewStoreWithClock(clk)
+
+	var dropped []string
+	s.OnKeyDropped(func(key string) {
+		dropped = append(dropped, key)
+	})
+
+	// Fill to capacity.
+	for i := 0; i < maxKeys; i++ {
+		s.Increment(fmt.Sprintf("key-%d", i))
+	}
+
+	if len(dropped) != 0 {
+		t.Fatalf("expected no drops while filling, got %d", len(dropped))
+	}
+
+	// These should trigger the callback.
+	s.Increment("overflow-1")
+	s.Increment("overflow-2")
+
+	if len(dropped) != 2 {
+		t.Fatalf("expected 2 drops, got %d", len(dropped))
+	}
+	if dropped[0] != "overflow-1" || dropped[1] != "overflow-2" {
+		t.Errorf("dropped = %v, want [overflow-1, overflow-2]", dropped)
+	}
+}
+
 func TestStore_MaxTimestampsPerKey(t *testing.T) {
 	clk := newMockClock()
 	s := NewStoreWithClock(clk)

@@ -24,6 +24,7 @@ func BenchmarkEvaluate_Allow(b *testing.B) {
 		Context:   keep.CallContext{AgentID: "bench", Timestamp: time.Now(), Scope: "linear-tools"},
 	}
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = eng.Evaluate(call, "linear-tools")
@@ -43,6 +44,7 @@ func BenchmarkEvaluate_Deny(b *testing.B) {
 		Context:   keep.CallContext{AgentID: "bench", Timestamp: time.Now(), Scope: "linear-tools"},
 	}
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = eng.Evaluate(call, "linear-tools")
@@ -62,6 +64,7 @@ func BenchmarkEvaluate_Redact(b *testing.B) {
 		Context:   keep.CallContext{AgentID: "bench", Timestamp: time.Now(), Scope: "anthropic-gateway"},
 	}
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = eng.Evaluate(call, "anthropic-gateway")
@@ -100,6 +103,7 @@ func BenchmarkEvaluate_ManyRules(b *testing.B) {
 		Context:   keep.CallContext{AgentID: "bench", Timestamp: time.Now(), Scope: "bench-scope"},
 	}
 
+	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		_, _ = eng.Evaluate(call, "bench-scope")

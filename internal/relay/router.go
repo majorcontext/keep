@@ -102,6 +102,9 @@ func NewRouter(ctx context.Context, routes []relayconfig.Route) (*Router, error)
 		tools, err := client.ListTools(ctx)
 		if err != nil {
 			log.Printf("relay: upstream %q tool discovery failed: %v (skipping)", upstreamLabel, err)
+			if closer, ok := client.(interface{ Close() error }); ok {
+				_ = closer.Close()
+			}
 			continue
 		}
 

@@ -26,11 +26,12 @@ func (realClock) Now() time.Time { return time.Now() }
 
 // Store is a thread-safe sliding window counter store.
 type Store struct {
-	mu       sync.Mutex
-	data     map[string][]time.Time
-	clock    Clock
-	stopCh   chan struct{}
-	stopOnce sync.Once
+	mu           sync.Mutex
+	data         map[string][]time.Time
+	clock        Clock
+	stopCh       chan struct{}
+	stopOnce     sync.Once
+	onKeyDropped func(key string) // optional callback when a key is dropped at capacity
 }
 
 // NewStore creates a new counter store using real time.
@@ -49,6 +50,14 @@ func NewStoreWithClock(clock Clock) *Store {
 	}
 }
 
+// OnKeyDropped sets a callback that is invoked (under lock) when a new key
+// is dropped because the store has reached maxKeys capacity.
+func (s *Store) OnKeyDropped(fn func(key string)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onKeyDropped = fn
+}
+
 // Increment records a hit for the given key at the current time.
 // If the store has reached maxKeys and the key is new, the increment is skipped.
 // If a key has reached maxTimestampsPerKey, the oldest entries are trimmed.
@@ -59,6 +68,9 @@ func (s *Store) Increment(key string) {
 	// Enforce key limit: skip new keys when at capacity.
 	if _, exists := s.data[key]; !exists {
 		if len(s.data) >= maxKeys {
+			if s.onKeyDropped != nil {
+				s.onKeyDropped(key)
+			}
 			return
 		}
 	}

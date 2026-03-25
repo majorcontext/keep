@@ -139,7 +139,31 @@ func writeInternalError(w http.ResponseWriter, msg string) {
 
 // handleMessages processes /v1/messages requests with bidirectional policy evaluation.
 func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
-	// 1. Read request body (with size limit to prevent memory exhaustion).
+	// 1. Read and parse request.
+	body, req, err := p.readRequest(w, r)
+	if err != nil {
+		return // error already written to w
+	}
+
+	// 2. Evaluate request policy.
+	evalResult, err := p.evaluateRequestPolicy(w, req, body)
+	if err != nil {
+		return // error (or deny) already written to w
+	}
+
+	// 3. Streaming: buffer, evaluate, replay/synthesize.
+	if req.Stream {
+		p.handleStreamingResponse(w, r, evalResult.forwardBody)
+		return
+	}
+
+	// 4. Non-streaming: forward, evaluate response, return.
+	p.handleNonStreamingResponse(w, r, evalResult.forwardBody)
+}
+
+// readRequest reads the request body (with size limits) and parses it as a MessagesRequest.
+// On error, it writes the appropriate error response to w and returns a non-nil error.
+func (p *Proxy) readRequest(w http.ResponseWriter, r *http.Request) ([]byte, *anthropic.MessagesRequest, error) {
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxRequestBodySize))
 	if err != nil {
 		var maxErr *http.MaxBytesError
@@ -153,10 +177,10 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 					Message: fmt.Sprintf("Request body exceeds maximum allowed size of %d bytes", maxRequestBodySize),
 				},
 			})
-			return
+			return nil, nil, err
 		}
 		writeInternalError(w, "failed to read request body")
-		return
+		return nil, nil, err
 	}
 
 	// Verbose: log raw request.
@@ -164,11 +188,10 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		p.verbose.RequestRaw(body)
 	}
 
-	// 2. Parse as MessagesRequest.
 	var req anthropic.MessagesRequest
 	if err := json.Unmarshal(body, &req); err != nil {
 		writeInternalError(w, "failed to parse request body")
-		return
+		return nil, nil, err
 	}
 
 	mode := "non-streaming"
@@ -181,10 +204,22 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		"messages", len(req.Messages),
 	)
 
-	// 3. Decompose request into calls.
-	calls := anthropic.DecomposeRequest(&req, p.scope, p.decompose)
+	return body, &req, nil
+}
 
-	// 4. Evaluate each call. Track block results for reassembly.
+// requestPolicyResult holds the output of request policy evaluation.
+type requestPolicyResult struct {
+	forwardBody []byte
+}
+
+// evaluateRequestPolicy decomposes the request, evaluates each call against policy,
+// and reassembles the request body if any redactions were applied.
+// On deny or error, it writes the appropriate response to w and returns a non-nil error.
+func (p *Proxy) evaluateRequestPolicy(w http.ResponseWriter, req *anthropic.MessagesRequest, body []byte) (*requestPolicyResult, error) {
+	// Decompose request into calls.
+	calls := anthropic.DecomposeRequest(req, p.scope, p.decompose)
+
+	// Evaluate each call. Track block results for reassembly.
 	// DecomposeRequest emits: optional summary call, then one call per content block.
 	// We need to map the content-block calls back to (MessageIndex, BlockIndex).
 	summaryOffset := 0
@@ -193,7 +228,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build the block index mapping by re-walking messages (same order as DecomposeRequest).
-	blockMap := buildRequestBlockMap(&req, p.decompose)
+	blockMap := buildRequestBlockMap(req, p.decompose)
 
 	hasRedaction := false
 	blockResults := make([]anthropic.BlockResult, len(blockMap))
@@ -203,7 +238,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		result, evalErr := p.engine.Evaluate(call, p.scope)
 		if evalErr != nil {
 			writeInternalError(w, "policy evaluation error")
-			return
+			return nil, evalErr
 		}
 
 		// Log audit entry.
@@ -218,7 +253,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 				p.verbose.RequestDenied(result.Rule, result.Message)
 			}
 			writePolicyDeny(w, result.Rule, result.Message)
-			return
+			return nil, fmt.Errorf("policy denied: %s", result.Rule)
 		}
 
 		// Track redactions for content blocks (skip the summary call).
@@ -242,14 +277,15 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		"redacted_rules", strings.Join(redactedRules, ","),
 	)
 
-	// 6. Reassemble if redacted.
+	// Reassemble if redacted.
 	forwardBody := body
 	if hasRedaction {
-		patched := anthropic.ReassembleRequest(&req, blockResults)
+		patched := anthropic.ReassembleRequest(req, blockResults)
+		var err error
 		forwardBody, err = json.Marshal(patched)
 		if err != nil {
 			writeInternalError(w, "failed to marshal patched request")
-			return
+			return nil, err
 		}
 	}
 
@@ -262,13 +298,13 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 7. Streaming: buffer, evaluate, replay/synthesize.
-	if req.Stream {
-		p.handleStreamingResponse(w, r, forwardBody)
-		return
-	}
+	return &requestPolicyResult{forwardBody: forwardBody}, nil
+}
 
-	// 8. Forward to upstream.
+// handleNonStreamingResponse forwards the request to upstream, reads the response,
+// evaluates response policy, and writes the (possibly redacted) response back to the client.
+func (p *Proxy) handleNonStreamingResponse(w http.ResponseWriter, r *http.Request, forwardBody []byte) {
+	// Forward to upstream.
 	upstreamBase := strings.TrimRight(p.upstream.String(), "/")
 	upstreamURL := upstreamBase + "/v1/messages"
 	upstreamReq, err := http.NewRequestWithContext(r.Context(), "POST", upstreamURL, bytes.NewReader(forwardBody))
@@ -286,7 +322,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = upstreamResp.Body.Close() }()
 
-	// 8. Read response body.
+	// Read response body.
 	respBody, err := io.ReadAll(io.LimitReader(upstreamResp.Body, maxResponseBodySize))
 	if err != nil {
 		writeInternalError(w, "failed to read upstream response")
@@ -306,7 +342,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		p.verbose.ResponseRaw(respBody)
 	}
 
-	// 9. Parse as MessagesResponse.
+	// Parse as MessagesResponse.
 	var resp anthropic.MessagesResponse
 	if err := json.Unmarshal(respBody, &resp); err != nil {
 		// Can't parse response; pass through as-is.
@@ -316,10 +352,10 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 10. Decompose response.
+	// Decompose response.
 	respCalls := anthropic.DecomposeResponse(&resp, p.scope, p.decompose)
 
-	// 11. Evaluate response calls.
+	// Evaluate response calls.
 	respSummaryOffset := 0
 	if p.decompose.ResponseSummaryEnabled() && len(respCalls) > 0 {
 		respSummaryOffset = 1
@@ -342,7 +378,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 			p.logger.Log(result.Audit)
 		}
 
-		// 12. Check for deny.
+		// Check for deny.
 		if result.Decision == keep.Deny {
 			p.logDebug("response denied", "rule", result.Rule, "message", result.Message)
 			if p.verbose != nil {
@@ -368,7 +404,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 
 	p.logDebug("response policy", "status", upstreamResp.StatusCode, "calls", len(respCalls), "redacted", respHasRedaction)
 
-	// 13. Reassemble if redacted.
+	// Reassemble if redacted.
 	finalBody := respBody
 	if respHasRedaction {
 		patched := anthropic.ReassembleResponse(&resp, respBlockResults)
@@ -388,7 +424,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 14. Return response to agent.
+	// Return response to agent.
 	copyResponseHeaders(w, upstreamResp)
 	w.WriteHeader(upstreamResp.StatusCode)
 	_, _ = w.Write(finalBody)

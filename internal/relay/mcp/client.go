@@ -130,7 +130,7 @@ func unmarshalResult(rpcResp *JSONRPCResponse, dst any) error {
 // Initialize sends an initialize request to the MCP server.
 func (c *Client) Initialize(ctx context.Context) (*InitializeResult, error) {
 	params := InitializeParams{
-		ProtocolVersion: "2025-03-26",
+		ProtocolVersion: ProtocolVersion,
 		Capabilities:    map[string]any{},
 		ClientInfo: ClientInfo{
 			Name:    "keep",

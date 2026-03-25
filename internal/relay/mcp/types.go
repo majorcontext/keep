@@ -1,5 +1,8 @@
 package mcp
 
+// ProtocolVersion is the MCP protocol version supported by this implementation.
+const ProtocolVersion = "2025-03-26"
+
 // JSONRPCRequest is a JSON-RPC 2.0 request message.
 type JSONRPCRequest struct {
 	JSONRPC string `json:"jsonrpc"`

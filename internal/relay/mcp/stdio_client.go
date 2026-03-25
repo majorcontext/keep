@@ -171,7 +171,7 @@ func (c *StdioClient) notify(method string) error {
 // initialized notification.
 func (c *StdioClient) Initialize(ctx context.Context) (*InitializeResult, error) {
 	params := InitializeParams{
-		ProtocolVersion: "2025-03-26",
+		ProtocolVersion: ProtocolVersion,
 		Capabilities:    map[string]any{},
 		ClientInfo: ClientInfo{
 			Name:    "keep",

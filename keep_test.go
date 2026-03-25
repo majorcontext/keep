@@ -1,6 +1,7 @@
 package keep_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -287,6 +288,59 @@ func TestLoad_WithDefs(t *testing.T) {
 	}
 	if result.Decision != keep.Allow {
 		t.Errorf("Decision = %q, want %q for main branch", result.Decision, keep.Allow)
+	}
+}
+
+func TestEvaluate_Concurrent(t *testing.T) {
+	eng, err := keep.Load("testdata/rules")
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	defer eng.Close()
+
+	const goroutines = 50
+	const iterations = 100
+
+	errc := make(chan error, goroutines)
+
+	for g := 0; g < goroutines; g++ {
+		go func() {
+			for i := 0; i < iterations; i++ {
+				// Alternate between scopes and operations to exercise contention.
+				result, err := eng.Evaluate(keep.Call{
+					Operation: "create_issue",
+					Params:    map[string]any{"priority": 1, "title": "Concurrent test"},
+				}, "linear-tools")
+				if err != nil {
+					errc <- err
+					return
+				}
+				if result.Decision != keep.Allow {
+					errc <- fmt.Errorf("expected Allow, got %s", result.Decision)
+					return
+				}
+
+				result, err = eng.Evaluate(keep.Call{
+					Operation: "delete_issue",
+					Params:    map[string]any{"issueId": "ISSUE-1"},
+				}, "linear-tools")
+				if err != nil {
+					errc <- err
+					return
+				}
+				if result.Decision != keep.Deny {
+					errc <- fmt.Errorf("expected Deny, got %s", result.Decision)
+					return
+				}
+			}
+			errc <- nil
+		}()
+	}
+
+	for g := 0; g < goroutines; g++ {
+		if err := <-errc; err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

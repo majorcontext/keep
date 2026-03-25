@@ -12,9 +12,15 @@ type Reader struct {
 	scanner *bufio.Scanner
 }
 
+// maxLineSize is the maximum size of a single SSE line (1 MB).
+// This prevents memory exhaustion from malformed or malicious streams.
+const maxLineSize = 1024 * 1024
+
 // NewReader creates a Reader that parses SSE from r.
 func NewReader(r io.Reader) *Reader {
-	return &Reader{scanner: bufio.NewScanner(r)}
+	s := bufio.NewScanner(r)
+	s.Buffer(make([]byte, 0, 4096), maxLineSize)
+	return &Reader{scanner: s}
 }
 
 // Next returns the next event from the stream.
