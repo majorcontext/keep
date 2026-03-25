@@ -798,6 +798,82 @@ func TestEval_CaseInsensitiveFullPipeline(t *testing.T) {
 	})
 }
 
+// TestEval_DenyParamsSummaryUsesOriginalCase verifies that audit ParamsSummary
+// records use params.original (preserving original casing) rather than
+// params.cel (lowered) for all deny paths:
+//   - enforce-mode deny short-circuit
+//   - audit-only deny path
+func TestEval_DenyParamsSummaryUsesOriginalCase(t *testing.T) {
+	rules := []config.Rule{
+		{
+			Name:    "block-bash",
+			Match:   config.Match{Operation: "llm.tool_use", When: "params.name == 'bash'"},
+			Action:  config.ActionDeny,
+			Message: "bash blocked",
+		},
+	}
+
+	t.Run("enforce-mode deny preserves original case in ParamsSummary", func(t *testing.T) {
+		env, err := keepcel.NewEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ev, err := NewEvaluator(env, "test-scope", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		result := ev.Evaluate(Call{
+			Operation: "llm.tool_use",
+			Params:    map[string]any{"name": "Bash"},
+			Context:   CallContext{Timestamp: time.Now()},
+		})
+
+		if result.Decision != Deny {
+			t.Fatalf("expected Deny, got %s", result.Decision)
+		}
+		// ParamsSummary should contain the original "Bash", not lowered "bash".
+		if !strings.Contains(result.Audit.ParamsSummary, "Bash") {
+			t.Errorf("audit ParamsSummary should contain original-case %q, got: %s", "Bash", result.Audit.ParamsSummary)
+		}
+		if strings.Contains(result.Audit.ParamsSummary, `"bash"`) {
+			t.Errorf("audit ParamsSummary should not contain lowered %q, got: %s", "bash", result.Audit.ParamsSummary)
+		}
+	})
+
+	t.Run("audit-only deny preserves original case in ParamsSummary", func(t *testing.T) {
+		env, err := keepcel.NewEnv()
+		if err != nil {
+			t.Fatal(err)
+		}
+		ev, err := NewEvaluator(env, "test-scope", config.ModeAuditOnly, config.ErrorModeClosed, rules, nil, nil, nil, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		result := ev.Evaluate(Call{
+			Operation: "llm.tool_use",
+			Params:    map[string]any{"name": "Bash"},
+			Context:   CallContext{Timestamp: time.Now()},
+		})
+
+		// In audit-only mode, the returned Decision is Allow but Audit.Decision is Deny.
+		if result.Decision != Allow {
+			t.Fatalf("expected Allow (audit-only), got %s", result.Decision)
+		}
+		if result.Audit.Decision != Deny {
+			t.Fatalf("expected Audit.Decision Deny, got %s", result.Audit.Decision)
+		}
+		// ParamsSummary should contain the original "Bash", not lowered "bash".
+		if !strings.Contains(result.Audit.ParamsSummary, "Bash") {
+			t.Errorf("audit ParamsSummary should contain original-case %q, got: %s", "Bash", result.Audit.ParamsSummary)
+		}
+		if strings.Contains(result.Audit.ParamsSummary, `"bash"`) {
+			t.Errorf("audit ParamsSummary should not contain lowered %q, got: %s", "bash", result.Audit.ParamsSummary)
+		}
+	})
+}
+
 // TestEval_CaseInsensitiveRedactThenDeny verifies that mutations applied
 // via evalParams.applyMutations are visible to both the CEL view and the
 // original view. If a redaction rule runs first and a deny rule checks the

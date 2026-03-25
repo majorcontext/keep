@@ -256,7 +256,7 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 						Rule:           cr.rule.Name,
 						Message:        msg,
 						RulesEvaluated: rulesEvaluated,
-						ParamsSummary:  paramsSummary(params.cel),
+						ParamsSummary:  paramsSummary(params.original),
 						Enforced:       true,
 					},
 				}
@@ -296,7 +296,7 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 						Rule:           cr.rule.Name,
 						Message:        cr.rule.Message,
 						RulesEvaluated: rulesEvaluated,
-						ParamsSummary:  paramsSummary(params.cel),
+						ParamsSummary:  paramsSummary(params.original),
 						Enforced:       true,
 					},
 				}
@@ -368,7 +368,7 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 				Rule:           auditDenyRule,
 				Message:        auditDenyMessage,
 				RulesEvaluated: rulesEvaluated,
-				ParamsSummary:  paramsSummary(params.cel),
+				ParamsSummary:  paramsSummary(params.original),
 				Enforced:       false,
 			},
 		}
