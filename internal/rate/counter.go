@@ -64,6 +64,7 @@ func (s *Store) OnKeyDropped(fn func(key string)) {
 // If the store has reached maxKeys and the key is new, the increment is skipped.
 // If a key has reached maxTimestampsPerKey, the oldest entries are trimmed.
 func (s *Store) Increment(key string) {
+	now := s.clock.Now()
 	s.mu.Lock()
 
 	// Enforce key limit: skip new keys when at capacity.
@@ -78,7 +79,7 @@ func (s *Store) Increment(key string) {
 		}
 	}
 
-	s.data[key] = append(s.data[key], s.clock.Now())
+	s.data[key] = append(s.data[key], now)
 
 	// Enforce per-key timestamp limit: trim oldest entries.
 	if len(s.data[key]) > maxTimestampsPerKey {
