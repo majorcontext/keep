@@ -95,7 +95,7 @@ This design means an operator reviewing audit logs can answer two questions with
 
 Redaction and deny are independent decisions. If a call matches both a redact rule and a deny rule, the deny takes precedence -- the call is blocked, and no redacted params are returned. If a call matches redact and log rules but no deny rule, the call is allowed with redacted params and all matched rules appear in the audit entry.
 
-In `audit_only` mode, redact rules are evaluated and mutations are recorded in the audit log, but the engine does not enforce the mutations. This allows operators to see what would be redacted in production without modifying actual traffic -- useful when tuning patterns or rolling out new rules.
+In `audit_only` mode, redact rules are skipped entirely. Mutations are neither computed nor applied, and no `RedactedField` entries are recorded. The engine treats the call as if no redact rules existed. To observe what would be redacted before enabling enforcement, use a non-audit policy against a staging environment.
 
 Redaction does not modify the original params map passed to the engine. The engine deep-copies the params before applying mutations, so callers retain access to the unmodified input for their own use. The `EvalResult` contains the mutated params separately.
 

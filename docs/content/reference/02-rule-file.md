@@ -68,7 +68,7 @@ Required when `action` is `redact`. Must have `secrets: true`, non-empty `patter
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
 | `match` | `string` | Yes | RE2 regex pattern. Must not be empty. |
-| `replace` | `string` | Yes | Literal replacement string. The entire match is replaced (no capture group references). |
+| `replace` | `string` | Yes | Replacement string. Supports RE2 capture group references (`$1`, `${name}`, etc.). The entire match is replaced with the expanded value. |
 
 ## Defs
 

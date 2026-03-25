@@ -77,7 +77,7 @@ internal/
 
 Keep uses CEL with custom functions:
 
-- `inTimeWindow(start, end, tz)` -- temporal predicate against `context.timestamp`
+- `inTimeWindow(now, start, end, tz)` -- returns true if `now` falls within the time window defined by `start` and `end` in the given `tz` timezone
 - `dayOfWeek()` / `dayOfWeek(tz)` -- day name from `context.timestamp`
 - `containsAny(field, terms)` -- case-insensitive keyword match
 - `lower(field)` -- lowercase string
