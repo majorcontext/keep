@@ -241,9 +241,10 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 					return types.Bool(len(findings) > 0)
 				}),
 			),
-			// hasSecrets(loweredValue, originalParams) — uses original params for detection.
-			// The engine rewrites hasSecrets(params.X) to hasSecrets(params.X, _originalParams)
-			// when case normalization is active.
+			// hasSecrets(loweredValue, originalFieldValue) — uses original-case field value for detection.
+			// The engine rewrites hasSecrets(params.X) to hasSecrets(params.X, _originalParams.X)
+			// when case normalization is active, so the second arg is the original-case string
+			// for that specific field only.
 			cel.Overload("hasSecrets_string_dyn",
 				[]*cel.Type{cel.StringType, cel.DynType},
 				cel.BoolType,
@@ -251,20 +252,18 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 					if cfg.secretDetector == nil {
 						return types.Bool(false)
 					}
-					// The second arg is the _originalParams map.
-					// We detect secrets across all string values in it.
-					origMap, ok := args[1].Value().(map[string]any)
-					if !ok {
-						// Fallback: use the lowered string directly.
-						s, ok := args[0].(types.String)
-						if !ok {
-							return types.Bool(false)
-						}
-						findings := cfg.secretDetector.Detect(string(s))
+					// Prefer the second arg (original-case field value) for detection.
+					if orig, ok := args[1].(types.String); ok {
+						findings := cfg.secretDetector.Detect(string(orig))
 						return types.Bool(len(findings) > 0)
 					}
-					// Check all string values in originalParams for secrets.
-					return types.Bool(hasSecretsInMap(cfg.secretDetector, origMap))
+					// Fallback: use the first arg (lowered value) directly.
+					s, ok := args[0].(types.String)
+					if !ok {
+						return types.Bool(false)
+					}
+					findings := cfg.secretDetector.Detect(string(s))
+					return types.Bool(len(findings) > 0)
 				}),
 			),
 		),
@@ -275,22 +274,6 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 	return &Env{env: env, cfg: cfg}, nil
 }
 
-// hasSecretsInMap checks all string values in a map for secrets.
-func hasSecretsInMap(detector *secrets.Detector, m map[string]any) bool {
-	for _, v := range m {
-		switch val := v.(type) {
-		case string:
-			if len(detector.Detect(val)) > 0 {
-				return true
-			}
-		case map[string]any:
-			if hasSecretsInMap(detector, val) {
-				return true
-			}
-		}
-	}
-	return false
-}
 
 // Program is a compiled CEL expression ready for evaluation.
 type Program struct {

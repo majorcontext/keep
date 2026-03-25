@@ -11,17 +11,17 @@ func TestRewriteHasSecrets(t *testing.T) {
 		{
 			name: "single arg simple",
 			in:   "hasSecrets(params.text)",
-			want: "hasSecrets(params.text, _originalParams)",
+			want: "hasSecrets(params.text, _originalParams.text)",
 		},
 		{
 			name: "single arg nested field",
 			in:   "hasSecrets(params.input.command)",
-			want: "hasSecrets(params.input.command, _originalParams)",
+			want: "hasSecrets(params.input.command, _originalParams.input.command)",
 		},
 		{
 			name: "already two args",
-			in:   "hasSecrets(params.text, _originalParams)",
-			want: "hasSecrets(params.text, _originalParams)",
+			in:   "hasSecrets(params.text, _originalParams.text)",
+			want: "hasSecrets(params.text, _originalParams.text)",
 		},
 		{
 			name: "no hasSecrets",
@@ -31,12 +31,12 @@ func TestRewriteHasSecrets(t *testing.T) {
 		{
 			name: "embedded in expression",
 			in:   "params.name == 'bash' && hasSecrets(params.text)",
-			want: "params.name == 'bash' && hasSecrets(params.text, _originalParams)",
+			want: "params.name == 'bash' && hasSecrets(params.text, _originalParams.text)",
 		},
 		{
 			name: "multiple calls",
 			in:   "hasSecrets(params.a) || hasSecrets(params.b)",
-			want: "hasSecrets(params.a, _originalParams) || hasSecrets(params.b, _originalParams)",
+			want: "hasSecrets(params.a, _originalParams.a) || hasSecrets(params.b, _originalParams.b)",
 		},
 		{
 			name: "nested function call as arg",
@@ -46,7 +46,7 @@ func TestRewriteHasSecrets(t *testing.T) {
 		{
 			name: "string with parens",
 			in:   `hasSecrets(params.text) && params.x == "foo(bar)"`,
-			want: `hasSecrets(params.text, _originalParams) && params.x == "foo(bar)"`,
+			want: `hasSecrets(params.text, _originalParams.text) && params.x == "foo(bar)"`,
 		},
 		{
 			name: "empty expression",

@@ -102,3 +102,50 @@ func TestHasSecrets_False(t *testing.T) {
 		t.Error("expected hasSecrets to return false for clean text")
 	}
 }
+
+// TestHasSecrets_FieldScoped verifies that hasSecrets(params.X) checks only
+// the named field and not every field in params. If only params.secret_field
+// contains a secret, then hasSecrets(params.safe_field) must return false.
+func TestHasSecrets_FieldScoped(t *testing.T) {
+	det, err := secrets.NewDetector()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := keepcel.NewEnv(keepcel.WithSecretDetector(det))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	params := map[string]any{
+		"safe_field":   "nothing secret here",
+		"secret_field": "key is AKIAIOSFODNN7REALKEY",
+	}
+
+	// Checking the safe field should return false even though secret_field has a secret.
+	expr := keepcel.InjectOriginalParams("hasSecrets(params.safe_field)")
+	prog, err := env.Compile(expr)
+	if err != nil {
+		t.Fatalf("Compile(%q) error: %v", expr, err)
+	}
+	got, err := prog.Eval(params, nil, params)
+	if err != nil {
+		t.Fatalf("Eval() error: %v", err)
+	}
+	if got {
+		t.Error("hasSecrets(params.safe_field) should return false when only secret_field has a secret")
+	}
+
+	// Checking the secret field should return true.
+	expr2 := keepcel.InjectOriginalParams("hasSecrets(params.secret_field)")
+	prog2, err := env.Compile(expr2)
+	if err != nil {
+		t.Fatalf("Compile(%q) error: %v", expr2, err)
+	}
+	got2, err := prog2.Eval(params, nil, params)
+	if err != nil {
+		t.Fatalf("Eval() error: %v", err)
+	}
+	if !got2 {
+		t.Error("hasSecrets(params.secret_field) should return true when secret_field has a secret")
+	}
+}

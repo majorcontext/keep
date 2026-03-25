@@ -88,8 +88,21 @@ func injectOriginalParamsForFunc(expr string, fnName string) string {
 		closePos := i - 1 // position of the closing ')'
 
 		if !commaFound {
-			// Single-argument call: inject _originalParams.
-			inject := ", _originalParams"
+			// Single-argument call: inject a second arg for original-case lookup.
+			// If the argument starts with "params.", replace the prefix with
+			// "_originalParams." so the two-arg overload receives only the
+			// specific field value (original case) rather than the full map.
+			// For other expressions (e.g. lower(params.text)) fall back to
+			// injecting the full _originalParams map.
+			arg := result[start:closePos]
+			var inject string
+			if strings.HasPrefix(strings.TrimSpace(arg), "params.") {
+				trimmed := strings.TrimSpace(arg)
+				origArg := "_originalParams." + trimmed[len("params."):]
+				inject = ", " + origArg
+			} else {
+				inject = ", _originalParams"
+			}
 			result = result[:closePos] + inject + result[closePos:]
 			offset = closePos + len(inject) + 1
 		} else {
