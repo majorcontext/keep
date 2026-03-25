@@ -93,10 +93,15 @@ func (s *Store) Count(key string, window time.Duration) int {
 // Runs every interval, removing entries older than maxAge.
 // Call StopGC to stop the goroutine.
 func (s *Store) StartGC(interval, maxAge time.Duration) {
+	s.mu.Lock()
 	if s.stopCh != nil {
+		s.mu.Unlock()
 		return // already running
 	}
 	s.stopCh = make(chan struct{})
+	stopCh := s.stopCh
+	s.mu.Unlock()
+
 	go func() {
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
@@ -104,7 +109,7 @@ func (s *Store) StartGC(interval, maxAge time.Duration) {
 			select {
 			case <-ticker.C:
 				s.GC(maxAge)
-			case <-s.stopCh:
+			case <-stopCh:
 				return
 			}
 		}
@@ -114,8 +119,12 @@ func (s *Store) StartGC(interval, maxAge time.Duration) {
 // StopGC stops the periodic garbage collection goroutine.
 // It is safe to call multiple times.
 func (s *Store) StopGC() {
-	if s.stopCh != nil {
-		s.stopOnce.Do(func() { close(s.stopCh) })
+	s.mu.Lock()
+	ch := s.stopCh
+	s.mu.Unlock()
+
+	if ch != nil {
+		s.stopOnce.Do(func() { close(ch) })
 	}
 }
 
