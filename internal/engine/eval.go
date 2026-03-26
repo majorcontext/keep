@@ -176,6 +176,7 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 		"scope":     call.Context.Scope,
 		"direction": call.Context.Direction,
 		"labels":    call.Context.Labels,
+		"operation": call.Operation,
 	}
 
 	// params tracks two views: cel (lowered, for CEL matching) and original
