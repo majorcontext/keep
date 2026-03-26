@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-03-26
+
+### Added
+
+- Case-insensitive matching mode for policy evaluation — normalize operation names and parameters so rules match regardless of casing
+- Uppercase literal linter that warns when case-insensitive mode is enabled but rules contain uppercase literals
+- `hasSecrets()` now uses original-case parameters for accurate secret detection even under case normalization
+- Limitations page in documentation
+
+### Fixed
+
+- **rate**: capture `clock.Now()` before acquiring lock in `Increment` to avoid timing skew
+- **rate**: protect `stopCh` with mutex in `StartGC`/`StopGC` to prevent data race
+- **gateway**: add bounds check for response block map access
+- **cel**: scope `hasSecrets` detection to the named field instead of scanning all params
+- **engine**: preserve original-case params in audit `ParamsSummary` for deny paths
+- **relay**: use `atomic.Bool` for MCP server initialized flag
+- Actionable context added to audit logger and pack resolver error messages
+
+### Changed
+
+- Improved case-insensitive normalization maintainability in engine
+- Documentation fixes: redaction `audit_only` behavior, capture group examples, `inTimeWindow` signature
+- Updated installation instructions for Homebrew
+
 ## [0.1.0] - 2026-03-23
 
 Initial public release.
