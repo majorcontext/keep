@@ -532,3 +532,63 @@ rules:
 		t.Errorf("Decision = %q, want deny (ForceEnforce)", result.Decision)
 	}
 }
+
+func TestWithAuditHook(t *testing.T) {
+	var events []keep.AuditEntry
+	eng, err := keep.Load("testdata/rules",
+		keep.WithAuditHook(func(entry keep.AuditEntry) {
+			events = append(events, entry)
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	// Allow path.
+	eng.Evaluate(keep.Call{
+		Operation: "create_issue",
+		Params:    map[string]any{"priority": 1, "title": "Test"},
+	}, "linear-tools")
+
+	// Deny path.
+	eng.Evaluate(keep.Call{
+		Operation: "delete_issue",
+		Params:    map[string]any{"issueId": "X"},
+	}, "linear-tools")
+
+	if len(events) != 2 {
+		t.Fatalf("got %d events, want 2", len(events))
+	}
+	if events[0].Decision != keep.Allow {
+		t.Errorf("events[0].Decision = %q, want allow", events[0].Decision)
+	}
+	if events[1].Decision != keep.Deny {
+		t.Errorf("events[1].Decision = %q, want deny", events[1].Decision)
+	}
+	if events[1].Rule != "no-delete" {
+		t.Errorf("events[1].Rule = %q, want no-delete", events[1].Rule)
+	}
+}
+
+func TestWithAuditHook_NotCalledOnError(t *testing.T) {
+	var called bool
+	eng, err := keep.Load("testdata/rules",
+		keep.WithAuditHook(func(entry keep.AuditEntry) {
+			called = true
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	// Unknown scope produces an error, hook should not fire.
+	_, err = eng.Evaluate(keep.Call{Operation: "anything"}, "nonexistent")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if called {
+		t.Error("audit hook should not be called on scope-not-found error")
+	}
+}

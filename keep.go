@@ -47,6 +47,7 @@ type engineConfig struct {
 	profilesDir  string
 	packsDir     string
 	modeOverride config.Mode
+	auditHook    func(AuditEntry)
 }
 
 // Option configures Load behavior.
@@ -61,6 +62,13 @@ func WithPacksDir(dir string) Option { return func(c *engineConfig) { c.packsDir
 // WithMode overrides the mode for all scopes. Valid values are "enforce"
 // and "audit_only". Returns an error from Load/LoadFromBytes if invalid.
 func WithMode(mode string) Option { return func(c *engineConfig) { c.modeOverride = config.Mode(mode) } }
+
+// WithAuditHook registers a callback invoked synchronously after every
+// Evaluate call. The hook receives the AuditEntry from the evaluation
+// result. It is not called when Evaluate returns an error (e.g. unknown scope).
+func WithAuditHook(hook func(AuditEntry)) Option {
+	return func(c *engineConfig) { c.auditHook = hook }
+}
 
 // WithForceEnforce overrides every scope's mode to "enforce".
 // Deprecated: Use WithMode("enforce") instead.
@@ -133,7 +141,11 @@ func (e *Engine) Evaluate(call Call, scope string) (EvalResult, error) {
 		return EvalResult{}, fmt.Errorf("keep: scope %q not found (available: %s)", scope, strings.Join(e.Scopes(), ", "))
 	}
 
-	return ev.Evaluate(call), nil
+	result := ev.Evaluate(call)
+	if e.cfg.auditHook != nil {
+		e.cfg.auditHook(result.Audit)
+	}
+	return result, nil
 }
 
 // Scopes returns the sorted list of loaded scope names.
