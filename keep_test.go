@@ -546,16 +546,20 @@ func TestWithAuditHook(t *testing.T) {
 	defer eng.Close()
 
 	// Allow path.
-	eng.Evaluate(keep.Call{
+	if _, err := eng.Evaluate(keep.Call{
 		Operation: "create_issue",
 		Params:    map[string]any{"priority": 1, "title": "Test"},
-	}, "linear-tools")
+	}, "linear-tools"); err != nil {
+		t.Fatal(err)
+	}
 
 	// Deny path.
-	eng.Evaluate(keep.Call{
+	if _, err := eng.Evaluate(keep.Call{
 		Operation: "delete_issue",
 		Params:    map[string]any{"issueId": "X"},
-	}, "linear-tools")
+	}, "linear-tools"); err != nil {
+		t.Fatal(err)
+	}
 
 	if len(events) != 2 {
 		t.Fatalf("got %d events, want 2", len(events))
