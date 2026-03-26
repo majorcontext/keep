@@ -61,7 +61,9 @@ func WithPacksDir(dir string) Option { return func(c *engineConfig) { c.packsDir
 
 // WithMode overrides the mode for all scopes. Valid values are "enforce"
 // and "audit_only". Returns an error from Load/LoadFromBytes if invalid.
-func WithMode(mode string) Option { return func(c *engineConfig) { c.modeOverride = config.Mode(mode) } }
+func WithMode(mode string) Option {
+	return func(c *engineConfig) { c.modeOverride = config.Mode(mode) }
+}
 
 // WithAuditHook registers a callback invoked synchronously after every
 // Evaluate call. The hook receives the AuditEntry from the evaluation
