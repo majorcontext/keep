@@ -46,7 +46,7 @@ type engineConfig struct {
 	rulesDir     string
 	profilesDir  string
 	packsDir     string
-	forceEnforce bool
+	modeOverride config.Mode
 }
 
 // Option configures Load behavior.
@@ -58,8 +58,13 @@ func WithProfilesDir(dir string) Option { return func(c *engineConfig) { c.profi
 // WithPacksDir sets the directory to load starter pack YAML files from.
 func WithPacksDir(dir string) Option { return func(c *engineConfig) { c.packsDir = dir } }
 
+// WithMode overrides the mode for all scopes. Valid values are "enforce"
+// and "audit_only". Returns an error from Load/LoadFromBytes if invalid.
+func WithMode(mode string) Option { return func(c *engineConfig) { c.modeOverride = config.Mode(mode) } }
+
 // WithForceEnforce overrides every scope's mode to "enforce".
-func WithForceEnforce() Option { return func(c *engineConfig) { c.forceEnforce = true } }
+// Deprecated: Use WithMode("enforce") instead.
+func WithForceEnforce() Option { return WithMode("enforce") }
 
 // Load reads rule files from rulesDir, compiles all CEL expressions and
 // redact patterns, and returns a ready-to-use Engine.
@@ -67,6 +72,9 @@ func Load(rulesDir string, opts ...Option) (*Engine, error) {
 	cfg := engineConfig{rulesDir: rulesDir}
 	for _, opt := range opts {
 		opt(&cfg)
+	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
 	}
 
 	// 1. Load config.
@@ -184,6 +192,13 @@ func LintRules(rulesDir string, profilesDir string, packsDir string) ([]LintWarn
 	return config.LintAll(lr), nil
 }
 
+func (c *engineConfig) validate() error {
+	if c.modeOverride != "" && c.modeOverride != config.ModeEnforce && c.modeOverride != config.ModeAuditOnly {
+		return fmt.Errorf("keep: invalid mode %q (must be %q or %q)", c.modeOverride, config.ModeEnforce, config.ModeAuditOnly)
+	}
+	return nil
+}
+
 // buildEvaluators creates compiled evaluators for every scope in the load result.
 func buildEvaluators(lr *config.LoadResult, celEnv *keepcel.Env, cfg engineConfig, detector *secrets.Detector) (map[string]*engine.Evaluator, error) {
 	evaluators := make(map[string]*engine.Evaluator, len(lr.Scopes))
@@ -199,8 +214,8 @@ func buildEvaluators(lr *config.LoadResult, celEnv *keepcel.Env, cfg engineConfi
 		}
 
 		mode := rf.Mode
-		if cfg.forceEnforce {
-			mode = config.ModeEnforce
+		if cfg.modeOverride != "" {
+			mode = cfg.modeOverride
 		}
 		if mode == "" {
 			mode = config.ModeAuditOnly // default

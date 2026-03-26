@@ -10,6 +10,16 @@ import (
 	"github.com/majorcontext/keep"
 )
 
+// ruleYAML is a helper for tests that need a temp rule file.
+func writeRule(t *testing.T, yaml string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "rules.yaml"), []byte(yaml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return dir
+}
+
 func TestLoad_ValidRules(t *testing.T) {
 	eng, err := keep.Load("testdata/rules")
 	if err != nil {
@@ -433,5 +443,92 @@ rules:
 	}
 	if result.Decision != keep.Deny {
 		t.Errorf("Decision = %q, want %q", result.Decision, keep.Deny)
+	}
+}
+
+func TestWithMode_Enforce(t *testing.T) {
+	dir := writeRule(t, `
+scope: test-mode
+mode: audit_only
+rules:
+  - name: block-all
+    match:
+      operation: "*"
+    action: deny
+    message: "blocked"
+`)
+	eng, err := keep.Load(dir, keep.WithMode("enforce"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	result, err := eng.Evaluate(keep.Call{Operation: "anything"}, "test-mode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision != keep.Deny {
+		t.Errorf("Decision = %q, want deny (enforce override)", result.Decision)
+	}
+	if !result.Audit.Enforced {
+		t.Error("Audit.Enforced = false, want true")
+	}
+}
+
+func TestWithMode_AuditOnly(t *testing.T) {
+	dir := writeRule(t, `
+scope: test-mode
+mode: enforce
+rules:
+  - name: block-all
+    match:
+      operation: "*"
+    action: deny
+    message: "blocked"
+`)
+	eng, err := keep.Load(dir, keep.WithMode("audit_only"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	result, err := eng.Evaluate(keep.Call{Operation: "anything"}, "test-mode")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision != keep.Allow {
+		t.Errorf("Decision = %q, want allow (audit_only override)", result.Decision)
+	}
+	if result.Audit.Enforced {
+		t.Error("Audit.Enforced = true, want false")
+	}
+}
+
+func TestWithMode_Invalid(t *testing.T) {
+	_, err := keep.Load("testdata/rules", keep.WithMode("bogus"))
+	if err == nil {
+		t.Fatal("expected error for invalid mode")
+	}
+}
+
+func TestWithForceEnforce_StillWorks(t *testing.T) {
+	dir := writeRule(t, `
+scope: test-mode
+mode: audit_only
+rules:
+  - name: block-all
+    match:
+      operation: "*"
+    action: deny
+`)
+	eng, err := keep.Load(dir, keep.WithForceEnforce())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	result, _ := eng.Evaluate(keep.Call{Operation: "anything"}, "test-mode")
+	if result.Decision != keep.Deny {
+		t.Errorf("Decision = %q, want deny (ForceEnforce)", result.Decision)
 	}
 }
