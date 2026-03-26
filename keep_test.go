@@ -718,3 +718,218 @@ rules:
 		t.Errorf("Decision = %q, want allow for P1", result.Decision)
 	}
 }
+
+func TestValidateRuleBytes_Valid(t *testing.T) {
+	err := keep.ValidateRuleBytes([]byte(`
+scope: test
+mode: enforce
+rules:
+  - name: block-all
+    match:
+      operation: "*"
+    action: deny
+`))
+	if err != nil {
+		t.Errorf("ValidateRuleBytes() = %v, want nil", err)
+	}
+}
+
+func TestValidateRuleBytes_InvalidYAML(t *testing.T) {
+	err := keep.ValidateRuleBytes([]byte("{{{}}}"))
+	if err == nil {
+		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func TestValidateRuleBytes_MissingScope(t *testing.T) {
+	err := keep.ValidateRuleBytes([]byte(`
+rules:
+  - name: test
+    match:
+      operation: "foo"
+    action: deny
+`))
+	if err == nil {
+		t.Fatal("expected error for missing scope")
+	}
+}
+
+func TestValidateRuleBytes_InvalidCEL(t *testing.T) {
+	err := keep.ValidateRuleBytes([]byte(`
+scope: test
+rules:
+  - name: bad-cel
+    match:
+      operation: "foo"
+      when: "invalid ++ expr"
+    action: deny
+`))
+	if err == nil {
+		t.Fatal("expected error for invalid CEL expression")
+	}
+}
+
+func TestValidateRuleBytes_Empty(t *testing.T) {
+	err := keep.ValidateRuleBytes(nil)
+	if err == nil {
+		t.Fatal("expected error for nil input")
+	}
+}
+
+func TestRuleSet_AllowDeny(t *testing.T) {
+	rs := keep.NewRuleSet("test-scope", "enforce")
+	rs.Allow("get_issue", "list_issues", "search_issues")
+	rs.Deny("delete_issue", "close_issue")
+
+	eng, err := rs.Compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	tests := []struct {
+		op   string
+		want keep.Decision
+	}{
+		{"get_issue", keep.Allow},
+		{"list_issues", keep.Allow},
+		{"search_issues", keep.Allow},
+		{"delete_issue", keep.Deny},
+		{"close_issue", keep.Deny},
+		{"update_issue", keep.Deny}, // not in allowlist
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.op, func(t *testing.T) {
+			result, err := eng.Evaluate(keep.Call{Operation: tc.op}, "test-scope")
+			if err != nil {
+				t.Fatal(err)
+			}
+			if result.Decision != tc.want {
+				t.Errorf("Decision = %q, want %q", result.Decision, tc.want)
+			}
+		})
+	}
+}
+
+func TestRuleSet_DenyOnly(t *testing.T) {
+	rs := keep.NewRuleSet("test-scope", "enforce")
+	rs.Deny("delete_issue")
+
+	eng, err := rs.Compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	// Denied tool.
+	result, err := eng.Evaluate(keep.Call{Operation: "delete_issue"}, "test-scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision != keep.Deny {
+		t.Errorf("Decision = %q, want deny", result.Decision)
+	}
+
+	// Anything else is allowed.
+	result, err = eng.Evaluate(keep.Call{Operation: "get_issue"}, "test-scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision != keep.Allow {
+		t.Errorf("Decision = %q, want allow", result.Decision)
+	}
+}
+
+func TestRuleSet_AllowOnly(t *testing.T) {
+	rs := keep.NewRuleSet("test-scope", "enforce")
+	rs.Allow("get_issue")
+
+	eng, err := rs.Compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	// Allowed tool.
+	result, err := eng.Evaluate(keep.Call{Operation: "get_issue"}, "test-scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision != keep.Allow {
+		t.Errorf("Decision = %q, want allow", result.Decision)
+	}
+
+	// Not in allowlist.
+	result, err = eng.Evaluate(keep.Call{Operation: "delete_issue"}, "test-scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision != keep.Deny {
+		t.Errorf("Decision = %q, want deny", result.Decision)
+	}
+}
+
+func TestRuleSet_WithOptions(t *testing.T) {
+	var events []keep.AuditEntry
+	rs := keep.NewRuleSet("test-scope", "enforce")
+	rs.Deny("delete_issue")
+
+	eng, err := rs.Compile(
+		keep.WithMode("audit_only"),
+		keep.WithAuditHook(func(e keep.AuditEntry) { events = append(events, e) }),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	result, err := eng.Evaluate(keep.Call{Operation: "delete_issue"}, "test-scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision != keep.Allow {
+		t.Errorf("Decision = %q, want allow (audit_only)", result.Decision)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d audit events, want 1", len(events))
+	}
+}
+
+func TestRuleSet_DenyPrecedenceOverAllow(t *testing.T) {
+	rs := keep.NewRuleSet("test-scope", "enforce")
+	rs.Allow("delete_issue")
+	rs.Deny("delete_issue")
+
+	eng, err := rs.Compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	result, err := eng.Evaluate(keep.Call{Operation: "delete_issue"}, "test-scope")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision != keep.Deny {
+		t.Errorf("Decision = %q, want deny (deny takes precedence)", result.Decision)
+	}
+}
+
+func TestRuleSet_EmptyCompiles(t *testing.T) {
+	rs := keep.NewRuleSet("empty", "enforce")
+	eng, err := rs.Compile()
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	// No rules means everything is allowed.
+	result, err := eng.Evaluate(keep.Call{Operation: "anything"}, "empty")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision != keep.Allow {
+		t.Errorf("Decision = %q, want allow", result.Decision)
+	}
+}

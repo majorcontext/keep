@@ -208,6 +208,120 @@ func LintRules(rulesDir string, profilesDir string, packsDir string) ([]LintWarn
 	return config.LintAll(lr), nil
 }
 
+// ValidateRuleBytes parses and validates a Keep rule file from raw YAML bytes
+// without compiling an engine. Use this to catch invalid rules early (e.g. at
+// deploy time) before the engine is needed at runtime.
+func ValidateRuleBytes(data []byte) error {
+	rf, err := config.ParseRuleFile(data)
+	if err != nil {
+		return fmt.Errorf("keep: %w", err)
+	}
+
+	// Also verify CEL expressions compile, since ParseRuleFile only checks
+	// YAML structure and field validation.
+	celEnv, err := keepcel.NewEnv()
+	if err != nil {
+		return fmt.Errorf("keep: create cel env: %w", err)
+	}
+	for _, rule := range rf.Rules {
+		if rule.Match.When != "" {
+			if _, err := celEnv.Compile(rule.Match.When); err != nil {
+				return fmt.Errorf("keep: rule %q: invalid CEL expression: %w", rule.Name, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// RuleSet is a programmatic builder for constructing policy rules without
+// generating YAML. It produces the same internal representation as LoadFromBytes.
+type RuleSet struct {
+	scope string
+	mode  string
+	allow []string
+	deny  []string
+}
+
+// NewRuleSet creates a new rule builder for the given scope.
+// Mode should be "enforce" or "audit_only".
+func NewRuleSet(scope, mode string) *RuleSet {
+	return &RuleSet{scope: scope, mode: mode}
+}
+
+// Allow adds operations to the allowlist. When an allowlist is present,
+// operations not in the list are denied.
+func (rs *RuleSet) Allow(ops ...string) {
+	rs.allow = append(rs.allow, ops...)
+}
+
+// Deny adds operations to the denylist. Deny takes precedence over Allow
+// for overlapping entries.
+func (rs *RuleSet) Deny(ops ...string) {
+	rs.deny = append(rs.deny, ops...)
+}
+
+// Compile builds an Engine from the rule set. Options (WithMode, WithAuditHook)
+// are applied the same as with LoadFromBytes.
+func (rs *RuleSet) Compile(opts ...Option) (*Engine, error) {
+	var cfg engineConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+
+	rules := rs.buildRules()
+	rf := &config.RuleFile{
+		Scope: rs.scope,
+		Mode:  config.Mode(rs.mode),
+		Rules: rules,
+	}
+
+	lr := &config.LoadResult{
+		Scopes:        map[string]*config.RuleFile{rs.scope: rf},
+		ResolvedRules: map[string][]config.Rule{rs.scope: rules},
+		Profiles:      map[string]*config.Profile{},
+	}
+
+	return buildEngine(lr, cfg)
+}
+
+func (rs *RuleSet) buildRules() []config.Rule {
+	var rules []config.Rule
+
+	// Deny rules come first — exact match, short-circuits on hit.
+	for _, op := range rs.deny {
+		rules = append(rules, config.Rule{
+			Name:    "deny-" + op,
+			Match:   config.Match{Operation: op},
+			Action:  config.ActionDeny,
+			Message: fmt.Sprintf("%s is not allowed", op),
+		})
+	}
+
+	// If there's an allowlist, add a catch-all deny that skips allowed
+	// operations via a CEL when clause on context.operation.
+	if len(rs.allow) > 0 {
+		// Build CEL expression: !(context.operation in ['op1', 'op2'])
+		quoted := make([]string, len(rs.allow))
+		for i, op := range rs.allow {
+			quoted[i] = fmt.Sprintf("'%s'", op)
+		}
+		when := fmt.Sprintf("!(context.operation in [%s])", strings.Join(quoted, ", "))
+
+		rules = append(rules, config.Rule{
+			Name:    "deny-unlisted",
+			Match:   config.Match{Operation: "*", When: when},
+			Action:  config.ActionDeny,
+			Message: "operation not in allowlist",
+		})
+	}
+
+	return rules
+}
+
 func (c *engineConfig) validate() error {
 	if c.modeOverride != "" && c.modeOverride != config.ModeEnforce && c.modeOverride != config.ModeAuditOnly {
 		return fmt.Errorf("keep: invalid mode %q (must be %q or %q)", c.modeOverride, config.ModeEnforce, config.ModeAuditOnly)
