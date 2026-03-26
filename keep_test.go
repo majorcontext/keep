@@ -592,3 +592,125 @@ func TestWithAuditHook_NotCalledOnError(t *testing.T) {
 		t.Error("audit hook should not be called on scope-not-found error")
 	}
 }
+
+func TestLoadFromBytes_Basic(t *testing.T) {
+	data := []byte(`
+scope: embedded
+mode: enforce
+rules:
+  - name: no-delete
+    match:
+      operation: "delete_*"
+    action: deny
+    message: "deletes blocked"
+`)
+	eng, err := keep.LoadFromBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	scopes := eng.Scopes()
+	if len(scopes) != 1 || scopes[0] != "embedded" {
+		t.Fatalf("Scopes() = %v, want [embedded]", scopes)
+	}
+
+	result, err := eng.Evaluate(keep.Call{Operation: "delete_issue"}, "embedded")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision != keep.Deny {
+		t.Errorf("Decision = %q, want deny", result.Decision)
+	}
+
+	result, err = eng.Evaluate(keep.Call{Operation: "get_issue"}, "embedded")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Decision != keep.Allow {
+		t.Errorf("Decision = %q, want allow", result.Decision)
+	}
+}
+
+func TestLoadFromBytes_InvalidYAML(t *testing.T) {
+	_, err := keep.LoadFromBytes([]byte("{{{}}}"))
+	if err == nil {
+		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+func TestLoadFromBytes_Empty(t *testing.T) {
+	_, err := keep.LoadFromBytes(nil)
+	if err == nil {
+		t.Fatal("expected error for nil input")
+	}
+}
+
+func TestLoadFromBytes_WithOptions(t *testing.T) {
+	var events []keep.AuditEntry
+	data := []byte(`
+scope: embedded
+mode: enforce
+rules:
+  - name: block-all
+    match:
+      operation: "*"
+    action: deny
+`)
+	eng, err := keep.LoadFromBytes(data,
+		keep.WithMode("audit_only"),
+		keep.WithAuditHook(func(e keep.AuditEntry) { events = append(events, e) }),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	result, _ := eng.Evaluate(keep.Call{Operation: "anything"}, "embedded")
+	if result.Decision != keep.Allow {
+		t.Errorf("want allow in audit mode, got %q", result.Decision)
+	}
+	if len(events) != 1 {
+		t.Fatalf("got %d audit events, want 1", len(events))
+	}
+	if events[0].Decision != keep.Deny {
+		t.Errorf("audit event Decision = %q, want deny", events[0].Decision)
+	}
+}
+
+func TestLoadFromBytes_CELExpression(t *testing.T) {
+	data := []byte(`
+scope: cel-test
+mode: enforce
+rules:
+  - name: no-p0
+    match:
+      operation: "create_issue"
+      when: "params.priority == 0"
+    action: deny
+    message: "P0 not allowed"
+`)
+	eng, err := keep.LoadFromBytes(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer eng.Close()
+
+	// P0 denied.
+	result, _ := eng.Evaluate(keep.Call{
+		Operation: "create_issue",
+		Params:    map[string]any{"priority": int64(0)},
+	}, "cel-test")
+	if result.Decision != keep.Deny {
+		t.Errorf("Decision = %q, want deny for P0", result.Decision)
+	}
+
+	// P1 allowed.
+	result, _ = eng.Evaluate(keep.Call{
+		Operation: "create_issue",
+		Params:    map[string]any{"priority": int64(1)},
+	}, "cel-test")
+	if result.Decision != keep.Allow {
+		t.Errorf("Decision = %q, want allow for P1", result.Decision)
+	}
+}

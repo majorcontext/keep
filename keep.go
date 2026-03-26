@@ -74,6 +74,37 @@ func WithAuditHook(hook func(AuditEntry)) Option {
 // Deprecated: Use WithMode("enforce") instead.
 func WithForceEnforce() Option { return WithMode("enforce") }
 
+// LoadFromBytes creates an Engine from raw YAML bytes representing a single
+// rule file. The YAML must contain a valid Keep rule file with a scope field.
+// Pack references are not supported — all rules must be inline.
+//
+// The returned Engine is safe for concurrent use. Call Close when done.
+//
+// This constructor is intended for embedding Keep in other programs (e.g. Moat)
+// where the caller controls configuration and does not use the filesystem.
+func LoadFromBytes(data []byte, opts ...Option) (*Engine, error) {
+	var cfg engineConfig
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+
+	rf, err := config.ParseRuleFile(data)
+	if err != nil {
+		return nil, fmt.Errorf("keep: %w", err)
+	}
+
+	lr := &config.LoadResult{
+		Scopes:        map[string]*config.RuleFile{rf.Scope: rf},
+		ResolvedRules: map[string][]config.Rule{rf.Scope: rf.Rules},
+		Profiles:      map[string]*config.Profile{},
+	}
+
+	return buildEngine(lr, cfg)
+}
+
 // Load reads rule files from rulesDir, compiles all CEL expressions and
 // redact patterns, and returns a ready-to-use Engine.
 func Load(rulesDir string, opts ...Option) (*Engine, error) {
@@ -85,41 +116,12 @@ func Load(rulesDir string, opts ...Option) (*Engine, error) {
 		return nil, err
 	}
 
-	// 1. Load config.
 	loadResult, err := config.LoadAll(rulesDir, cfg.profilesDir, cfg.packsDir)
 	if err != nil {
 		return nil, fmt.Errorf("keep: load config: %w", err)
 	}
 
-	// 2. Create rate store.
-	store := rate.NewStore()
-
-	// 2b. Create secrets detector.
-	detector, err := secrets.NewDetector()
-	if err != nil {
-		return nil, fmt.Errorf("keep: init secrets detector: %w", err)
-	}
-
-	// 3. Create CEL environment.
-	celEnv, err := keepcel.NewEnv(keepcel.WithRateStore(store), keepcel.WithSecretDetector(detector))
-	if err != nil {
-		return nil, fmt.Errorf("keep: create cel env: %w", err)
-	}
-
-	// 4. Build evaluators for each scope.
-	evaluators, err := buildEvaluators(loadResult, celEnv, cfg, detector)
-	if err != nil {
-		return nil, err
-	}
-
-	store.StartGC(60*time.Second, 24*time.Hour)
-
-	return &Engine{
-		evaluators: evaluators,
-		rateStore:  store,
-		secrets:    detector,
-		cfg:        cfg,
-	}, nil
+	return buildEngine(loadResult, cfg)
 }
 
 // Close stops the rate counter GC goroutine. Call this when the engine
@@ -209,6 +211,35 @@ func (c *engineConfig) validate() error {
 		return fmt.Errorf("keep: invalid mode %q (must be %q or %q)", c.modeOverride, config.ModeEnforce, config.ModeAuditOnly)
 	}
 	return nil
+}
+
+// buildEngine creates a ready-to-use Engine from a LoadResult and config.
+func buildEngine(lr *config.LoadResult, cfg engineConfig) (*Engine, error) {
+	store := rate.NewStore()
+
+	detector, err := secrets.NewDetector()
+	if err != nil {
+		return nil, fmt.Errorf("keep: init secrets detector: %w", err)
+	}
+
+	celEnv, err := keepcel.NewEnv(keepcel.WithRateStore(store), keepcel.WithSecretDetector(detector))
+	if err != nil {
+		return nil, fmt.Errorf("keep: create cel env: %w", err)
+	}
+
+	evaluators, err := buildEvaluators(lr, celEnv, cfg, detector)
+	if err != nil {
+		return nil, err
+	}
+
+	store.StartGC(60*time.Second, 24*time.Hour)
+
+	return &Engine{
+		evaluators: evaluators,
+		rateStore:  store,
+		secrets:    detector,
+		cfg:        cfg,
+	}, nil
 }
 
 // buildEvaluators creates compiled evaluators for every scope in the load result.
