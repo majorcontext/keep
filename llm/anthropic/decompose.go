@@ -8,18 +8,18 @@ import (
 	"github.com/majorcontext/keep/llm"
 )
 
-// BlockPosition identifies a content block within a request.
-type BlockPosition struct {
+// blockPosition identifies a content block within a request.
+type blockPosition struct {
 	MessageIndex int
 	BlockIndex   int
 	Block        ContentBlock
 	Role         string // role of the containing message
-	CallIndex    int    // index into the calls slice returned by DecomposeRequest
+	CallIndex    int    // index into the calls slice returned by decomposeRequest
 }
 
-// WalkRequestBlocks returns the positions of all blocks that DecomposeRequest would emit calls for.
-func WalkRequestBlocks(req *MessagesRequest, cfg llm.DecomposeConfig) []BlockPosition {
-	var positions []BlockPosition
+// walkRequestBlocks returns the positions of all blocks that decomposeRequest would emit calls for.
+func walkRequestBlocks(req *MessagesRequest, cfg llm.DecomposeConfig) []blockPosition {
+	var positions []blockPosition
 	callIdx := 0
 	if cfg.RequestSummaryEnabled() {
 		callIdx = 1 // account for the summary call at index 0
@@ -31,7 +31,7 @@ func WalkRequestBlocks(req *MessagesRequest, cfg llm.DecomposeConfig) []BlockPos
 			switch block.Type {
 			case "tool_result":
 				if cfg.ToolResultEnabled() {
-					positions = append(positions, BlockPosition{
+					positions = append(positions, blockPosition{
 						MessageIndex: msgIdx,
 						BlockIndex:   blockIdx,
 						Block:        block,
@@ -42,7 +42,7 @@ func WalkRequestBlocks(req *MessagesRequest, cfg llm.DecomposeConfig) []BlockPos
 				}
 			case "text":
 				if cfg.TextEnabled() {
-					positions = append(positions, BlockPosition{
+					positions = append(positions, blockPosition{
 						MessageIndex: msgIdx,
 						BlockIndex:   blockIdx,
 						Block:        block,
@@ -58,9 +58,9 @@ func WalkRequestBlocks(req *MessagesRequest, cfg llm.DecomposeConfig) []BlockPos
 	return positions
 }
 
-// WalkResponseBlocks returns the positions of all blocks that DecomposeResponse would emit calls for.
-func WalkResponseBlocks(resp *MessagesResponse, cfg llm.DecomposeConfig) []BlockPosition {
-	var positions []BlockPosition
+// walkResponseBlocks returns the positions of all blocks that decomposeResponse would emit calls for.
+func walkResponseBlocks(resp *MessagesResponse, cfg llm.DecomposeConfig) []blockPosition {
+	var positions []blockPosition
 	callIdx := 0
 	if cfg.ResponseSummaryEnabled() {
 		callIdx = 1
@@ -70,7 +70,7 @@ func WalkResponseBlocks(resp *MessagesResponse, cfg llm.DecomposeConfig) []Block
 		switch block.Type {
 		case "tool_use":
 			if cfg.ToolUseEnabled() {
-				positions = append(positions, BlockPosition{
+				positions = append(positions, blockPosition{
 					MessageIndex: 0,
 					BlockIndex:   blockIdx,
 					Block:        block,
@@ -81,7 +81,7 @@ func WalkResponseBlocks(resp *MessagesResponse, cfg llm.DecomposeConfig) []Block
 			}
 		case "text":
 			if cfg.TextEnabled() {
-				positions = append(positions, BlockPosition{
+				positions = append(positions, blockPosition{
 					MessageIndex: 0,
 					BlockIndex:   blockIdx,
 					Block:        block,
@@ -96,9 +96,9 @@ func WalkResponseBlocks(resp *MessagesResponse, cfg llm.DecomposeConfig) []Block
 	return positions
 }
 
-// DecomposeRequest breaks an Anthropic Messages API request into flat Keep calls.
+// decomposeRequest breaks an Anthropic Messages API request into flat Keep calls.
 // Returns one llm.request summary + one call per content block (based on decompose config).
-func DecomposeRequest(req *MessagesRequest, scope string, cfg llm.DecomposeConfig) []keep.Call {
+func decomposeRequest(req *MessagesRequest, scope string, cfg llm.DecomposeConfig) []keep.Call {
 	var calls []keep.Call
 
 	// Build a map from tool_use_id to tool name for resolving tool_result references.
@@ -120,7 +120,7 @@ func DecomposeRequest(req *MessagesRequest, scope string, cfg llm.DecomposeConfi
 	}
 
 	// 2. Walk messages for content blocks using the shared iterator.
-	for _, pos := range WalkRequestBlocks(req, cfg) {
+	for _, pos := range walkRequestBlocks(req, cfg) {
 		switch pos.Block.Type {
 		case "tool_result":
 			toolName := toolNameMap[pos.Block.ToolUseID]
@@ -148,8 +148,8 @@ func DecomposeRequest(req *MessagesRequest, scope string, cfg llm.DecomposeConfi
 	return calls
 }
 
-// DecomposeResponse breaks an Anthropic Messages API response into flat Keep calls.
-func DecomposeResponse(resp *MessagesResponse, scope string, cfg llm.DecomposeConfig) []keep.Call {
+// decomposeResponse breaks an Anthropic Messages API response into flat Keep calls.
+func decomposeResponse(resp *MessagesResponse, scope string, cfg llm.DecomposeConfig) []keep.Call {
 	var calls []keep.Call
 
 	// 1. Summary call.
@@ -165,7 +165,7 @@ func DecomposeResponse(resp *MessagesResponse, scope string, cfg llm.DecomposeCo
 	}
 
 	// 2. Walk response content blocks using the shared iterator.
-	for _, pos := range WalkResponseBlocks(resp, cfg) {
+	for _, pos := range walkResponseBlocks(resp, cfg) {
 		switch pos.Block.Type {
 		case "tool_use":
 			calls = append(calls, keep.Call{

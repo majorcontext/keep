@@ -389,18 +389,14 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 	p.logDebug("upstream stream", "status", upstreamResp.StatusCode, "events", len(events))
 
 	// 4. Evaluate stream via pipeline (reassemble, decompose, evaluate, reassemble/synthesize).
-	// Verbose: log reassembled response before policy.
-	if p.verbose != nil {
-		// Reassemble just for logging — the pipeline will do it again internally.
-		if assembled, logErr := p.codec.ReassembleStream(events); logErr == nil {
-			p.verbose.ResponseRaw(assembled)
-		}
-	}
-
 	streamResult, err := llm.EvaluateStream(p.engine, p.codec, events, p.scope, p.llmCfg)
 	if err != nil {
 		writeInternalError(w, "stream policy evaluation error")
 		return
+	}
+	// Verbose: log pre-policy reassembled body (avoids double-reassemble).
+	if p.verbose != nil {
+		p.verbose.ResponseRaw(streamResult.RawBody)
 	}
 	if p.logger != nil {
 		for _, a := range streamResult.Audits {

@@ -18,9 +18,9 @@ func TestReassembleFromEvents_TextOnly(t *testing.T) {
 		{Type: "message_stop", Data: `{"type":"message_stop"}`},
 	}
 
-	resp, err := ReassembleFromEvents(events)
+	resp, err := reassembleFromEvents(events)
 	if err != nil {
-		t.Fatalf("ReassembleFromEvents: %v", err)
+		t.Fatalf("reassembleFromEvents: %v", err)
 	}
 
 	if resp.ID != "msg_01" {
@@ -66,9 +66,9 @@ func TestReassembleFromEvents_ToolUse(t *testing.T) {
 		{Type: "message_stop", Data: `{"type":"message_stop"}`},
 	}
 
-	resp, err := ReassembleFromEvents(events)
+	resp, err := reassembleFromEvents(events)
 	if err != nil {
-		t.Fatalf("ReassembleFromEvents: %v", err)
+		t.Fatalf("reassembleFromEvents: %v", err)
 	}
 
 	if len(resp.Content) != 1 {
@@ -106,9 +106,9 @@ func TestReassembleFromEvents_MultiBlock(t *testing.T) {
 		{Type: "message_stop", Data: `{"type":"message_stop"}`},
 	}
 
-	resp, err := ReassembleFromEvents(events)
+	resp, err := reassembleFromEvents(events)
 	if err != nil {
-		t.Fatalf("ReassembleFromEvents: %v", err)
+		t.Fatalf("reassembleFromEvents: %v", err)
 	}
 
 	if len(resp.Content) != 2 {
@@ -137,9 +137,9 @@ func TestReassembleFromEvents_PingIgnored(t *testing.T) {
 		{Type: "message_stop", Data: `{"type":"message_stop"}`},
 	}
 
-	resp, err := ReassembleFromEvents(events)
+	resp, err := reassembleFromEvents(events)
 	if err != nil {
-		t.Fatalf("ReassembleFromEvents: %v", err)
+		t.Fatalf("reassembleFromEvents: %v", err)
 	}
 	if resp.Content[0].Text != "Hi" {
 		t.Errorf("Text = %q, want %q", resp.Content[0].Text, "Hi")
@@ -151,7 +151,7 @@ func TestReassembleFromEvents_NoMessageStart(t *testing.T) {
 		{Type: "content_block_start", Data: `{"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}`},
 	}
 
-	_, err := ReassembleFromEvents(events)
+	_, err := reassembleFromEvents(events)
 	if err == nil {
 		t.Fatal("expected error for missing message_start")
 	}
@@ -164,9 +164,9 @@ func TestReassembleFromEvents_EmptyContent(t *testing.T) {
 		{Type: "message_stop", Data: `{"type":"message_stop"}`},
 	}
 
-	resp, err := ReassembleFromEvents(events)
+	resp, err := reassembleFromEvents(events)
 	if err != nil {
-		t.Fatalf("ReassembleFromEvents: %v", err)
+		t.Fatalf("reassembleFromEvents: %v", err)
 	}
 	if len(resp.Content) != 0 {
 		t.Errorf("len(Content) = %d, want 0", len(resp.Content))
@@ -182,9 +182,9 @@ func TestReassembleFromEvents_MissingMessageStop(t *testing.T) {
 		{Type: "message_delta", Data: `{"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}`},
 	}
 
-	resp, err := ReassembleFromEvents(events)
+	resp, err := reassembleFromEvents(events)
 	if err != nil {
-		t.Fatalf("ReassembleFromEvents: %v", err)
+		t.Fatalf("reassembleFromEvents: %v", err)
 	}
 	if resp.Content[0].Text != "partial" {
 		t.Errorf("Text = %q, want %q", resp.Content[0].Text, "partial")
@@ -196,7 +196,7 @@ func TestReassembleFromEvents_MalformedJSON(t *testing.T) {
 		{Type: "message_start", Data: `{not json}`},
 	}
 
-	_, err := ReassembleFromEvents(events)
+	_, err := reassembleFromEvents(events)
 	if err == nil {
 		t.Fatal("expected error for malformed JSON")
 	}
@@ -218,7 +218,7 @@ func TestSynthesizeEvents_TextOnly(t *testing.T) {
 		Usage: &Usage{InputTokens: 25, OutputTokens: 10},
 	}
 
-	events := SynthesizeEvents(resp)
+	events := synthesizeEvents(resp)
 
 	wantTypes := []string{
 		"message_start",
@@ -255,7 +255,7 @@ func TestSynthesizeEvents_ToolUse(t *testing.T) {
 		Usage: &Usage{InputTokens: 30, OutputTokens: 15},
 	}
 
-	events := SynthesizeEvents(resp)
+	events := synthesizeEvents(resp)
 
 	if len(events) != 6 {
 		t.Fatalf("len(events) = %d, want 6", len(events))
@@ -282,7 +282,7 @@ func TestSynthesizeEvents_MultiBlock(t *testing.T) {
 		Usage: &Usage{InputTokens: 20, OutputTokens: 20},
 	}
 
-	events := SynthesizeEvents(resp)
+	events := synthesizeEvents(resp)
 
 	// message_start + (start+delta+stop)*2 + message_delta + message_stop = 1 + 6 + 2 = 9
 	if len(events) != 9 {
@@ -303,10 +303,10 @@ func TestSynthesizeEvents_RoundTrip(t *testing.T) {
 		Usage: &Usage{InputTokens: 25, OutputTokens: 10},
 	}
 
-	events := SynthesizeEvents(original)
-	rebuilt, err := ReassembleFromEvents(events)
+	events := synthesizeEvents(original)
+	rebuilt, err := reassembleFromEvents(events)
 	if err != nil {
-		t.Fatalf("ReassembleFromEvents: %v", err)
+		t.Fatalf("reassembleFromEvents: %v", err)
 	}
 
 	if rebuilt.ID != original.ID {
@@ -337,10 +337,10 @@ func TestSynthesizeEvents_ToolUseRoundTrip(t *testing.T) {
 		Usage: &Usage{InputTokens: 30, OutputTokens: 20},
 	}
 
-	events := SynthesizeEvents(original)
-	rebuilt, err := ReassembleFromEvents(events)
+	events := synthesizeEvents(original)
+	rebuilt, err := reassembleFromEvents(events)
 	if err != nil {
-		t.Fatalf("ReassembleFromEvents: %v", err)
+		t.Fatalf("reassembleFromEvents: %v", err)
 	}
 
 	if len(rebuilt.Content) != 2 {

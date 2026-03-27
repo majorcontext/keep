@@ -440,9 +440,14 @@ func TestProxy_StreamingAllowed(t *testing.T) {
 		t.Fatalf("expected 7 SSE events (original replay), got %d", len(events))
 	}
 
-	assembled, err := anthropic.ReassembleFromEvents(events)
+	codec := anthropic.NewCodec()
+	body, err := codec.ReassembleStream(events)
 	if err != nil {
-		t.Fatalf("ReassembleFromEvents: %v", err)
+		t.Fatalf("ReassembleStream: %v", err)
+	}
+	var assembled anthropic.MessagesResponse
+	if err := json.Unmarshal(body, &assembled); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
 	if assembled.Content[0].Text != "Hello from upstream" {
 		t.Errorf("Text = %q, want %q", assembled.Content[0].Text, "Hello from upstream")
@@ -547,9 +552,14 @@ func TestProxy_StreamingRedactResponse(t *testing.T) {
 		events = append(events, ev)
 	}
 
-	assembled, err := anthropic.ReassembleFromEvents(events)
+	codec := anthropic.NewCodec()
+	body, err := codec.ReassembleStream(events)
 	if err != nil {
-		t.Fatalf("ReassembleFromEvents: %v", err)
+		t.Fatalf("ReassembleStream: %v", err)
+	}
+	var assembled anthropic.MessagesResponse
+	if err := json.Unmarshal(body, &assembled); err != nil {
+		t.Fatalf("unmarshal: %v", err)
 	}
 
 	text := assembled.Content[0].Text

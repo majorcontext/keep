@@ -125,6 +125,7 @@ func EvaluateStream(engine *keep.Engine, codec Codec, events []sse.Event, scope 
 			Decision: keep.Deny,
 			Rule:     outcome.rule,
 			Message:  outcome.message,
+			RawBody:  body,
 			Audits:   collectAudits(results),
 		}, nil
 	}
@@ -154,6 +155,7 @@ func EvaluateStream(engine *keep.Engine, codec Codec, events []sse.Event, scope 
 		Message:  outcome.message,
 		Events:   outEvents,
 		Body:     outBody,
+		RawBody:  body,
 		Audits:   collectAudits(results),
 	}, nil
 }

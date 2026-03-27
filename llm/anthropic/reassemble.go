@@ -7,8 +7,8 @@ import (
 	keep "github.com/majorcontext/keep"
 )
 
-// BlockResult pairs a decomposed call's block index with its evaluation result.
-type BlockResult struct {
+// blockResult pairs a decomposed call's block index with its evaluation result.
+type blockResult struct {
 	// MessageIndex is the index into req.Messages.
 	MessageIndex int
 	// BlockIndex is the index into the message's content blocks.
@@ -17,9 +17,9 @@ type BlockResult struct {
 	Result keep.EvalResult
 }
 
-// ReassembleRequest patches redaction mutations back into an Anthropic request.
+// reassembleRequest patches redaction mutations back into an Anthropic request.
 // Returns a deep copy with mutated content. The original request is not modified.
-func ReassembleRequest(req *MessagesRequest, results []BlockResult) *MessagesRequest {
+func reassembleRequest(req *MessagesRequest, results []blockResult) *MessagesRequest {
 	copy := deepCopyRequest(req)
 
 	for _, br := range results {
@@ -48,9 +48,9 @@ func ReassembleRequest(req *MessagesRequest, results []BlockResult) *MessagesReq
 	return copy
 }
 
-// ReassembleResponse patches mutations into a response.
+// reassembleResponse patches mutations into a response.
 // Returns a deep copy with mutated content.
-func ReassembleResponse(resp *MessagesResponse, results []BlockResult) *MessagesResponse {
+func reassembleResponse(resp *MessagesResponse, results []blockResult) *MessagesResponse {
 	copy := deepCopyResponse(resp)
 
 	for _, br := range results {

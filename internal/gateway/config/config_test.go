@@ -3,7 +3,10 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+
+	"github.com/majorcontext/keep/llm"
 )
 
 func TestLoad_Valid(t *testing.T) {
@@ -196,6 +199,40 @@ decompose:
 	}
 	if !cfg.Decompose.ResponseSummaryEnabled() {
 		t.Error("decompose.response_summary: expected true (default)")
+	}
+}
+
+// TestDecomposeConfig_FieldParity ensures gateway's DecomposeConfig stays in
+// sync with llm.DecomposeConfig. If a field is added to one but not the other,
+// this test will catch the drift at compile time (via reflect).
+func TestDecomposeConfig_FieldParity(t *testing.T) {
+	gwType := reflect.TypeOf(DecomposeConfig{})
+	llmType := reflect.TypeOf(llm.DecomposeConfig{})
+
+	// Build a map of llm fields.
+	llmFields := make(map[string]reflect.Type, llmType.NumField())
+	for i := 0; i < llmType.NumField(); i++ {
+		f := llmType.Field(i)
+		llmFields[f.Name] = f.Type
+	}
+
+	// Every gateway field must exist in llm with the same type.
+	for i := 0; i < gwType.NumField(); i++ {
+		f := gwType.Field(i)
+		lt, ok := llmFields[f.Name]
+		if !ok {
+			t.Errorf("gateway DecomposeConfig has field %q not present in llm.DecomposeConfig", f.Name)
+			continue
+		}
+		if f.Type != lt {
+			t.Errorf("field %q: gateway type %v != llm type %v", f.Name, f.Type, lt)
+		}
+		delete(llmFields, f.Name)
+	}
+
+	// Every llm field must exist in gateway.
+	for name := range llmFields {
+		t.Errorf("llm.DecomposeConfig has field %q not present in gateway DecomposeConfig", name)
 	}
 }
 

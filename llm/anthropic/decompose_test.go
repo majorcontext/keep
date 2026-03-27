@@ -17,7 +17,7 @@ func TestDecomposeRequest_Summary(t *testing.T) {
 			{Role: "user", Content: "Hello"},
 		},
 	}
-	calls := DecomposeRequest(req, "test", llm.DecomposeConfig{})
+	calls := decomposeRequest(req, "test", llm.DecomposeConfig{})
 
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 call, got %d", len(calls))
@@ -59,7 +59,7 @@ func TestDecomposeRequest_ToolResults(t *testing.T) {
 			}},
 		},
 	}
-	calls := DecomposeRequest(req, "s", llm.DecomposeConfig{})
+	calls := decomposeRequest(req, "s", llm.DecomposeConfig{})
 
 	// Should have: 1 summary + 2 tool_results = 3
 	if len(calls) != 3 {
@@ -99,7 +99,7 @@ func TestDecomposeRequest_TextBlocks_Disabled(t *testing.T) {
 		},
 	}
 	// Default config: text=false.
-	calls := DecomposeRequest(req, "s", llm.DecomposeConfig{})
+	calls := decomposeRequest(req, "s", llm.DecomposeConfig{})
 
 	// Should only have the summary call; no text blocks.
 	if len(calls) != 1 {
@@ -119,7 +119,7 @@ func TestDecomposeRequest_TextBlocks_Enabled(t *testing.T) {
 		},
 	}
 	cfg := llm.DecomposeConfig{Text: boolPtr(true)}
-	calls := DecomposeRequest(req, "s", cfg)
+	calls := decomposeRequest(req, "s", cfg)
 
 	// 1 summary + 2 text blocks = 3
 	if len(calls) != 3 {
@@ -153,7 +153,7 @@ func TestDecomposeRequest_NoToolResults(t *testing.T) {
 			{Role: "user", Content: "Just text"},
 		},
 	}
-	calls := DecomposeRequest(req, "s", llm.DecomposeConfig{})
+	calls := decomposeRequest(req, "s", llm.DecomposeConfig{})
 
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 call, got %d", len(calls))
@@ -179,7 +179,7 @@ func TestDecomposeRequest_ToolNameLookup(t *testing.T) {
 			}},
 		},
 	}
-	calls := DecomposeRequest(req, "s", llm.DecomposeConfig{})
+	calls := decomposeRequest(req, "s", llm.DecomposeConfig{})
 
 	// Find the tool_result call.
 	var found bool
@@ -210,7 +210,7 @@ func TestDecomposeResponse_Summary(t *testing.T) {
 			{Type: "text", Text: "Hello!"},
 		},
 	}
-	calls := DecomposeResponse(resp, "s", llm.DecomposeConfig{})
+	calls := decomposeResponse(resp, "s", llm.DecomposeConfig{})
 
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 call, got %d", len(calls))
@@ -236,7 +236,7 @@ func TestDecomposeResponse_ToolUse(t *testing.T) {
 			{Type: "tool_use", ID: "tu_1", Name: "read_file", Input: map[string]any{"path": "/etc/hosts"}},
 		},
 	}
-	calls := DecomposeResponse(resp, "s", llm.DecomposeConfig{})
+	calls := decomposeResponse(resp, "s", llm.DecomposeConfig{})
 
 	// 1 summary + 1 tool_use = 2
 	if len(calls) != 2 {
@@ -266,7 +266,7 @@ func TestDecomposeResponse_MultipleBlocks(t *testing.T) {
 		},
 	}
 	// Default config: text=false, tool_use=true.
-	calls := DecomposeResponse(resp, "s", llm.DecomposeConfig{})
+	calls := decomposeResponse(resp, "s", llm.DecomposeConfig{})
 
 	// 1 summary + 1 tool_use (text skipped) = 2
 	if len(calls) != 2 {
@@ -290,7 +290,7 @@ func TestDecomposeResponse_Direction(t *testing.T) {
 		},
 	}
 	cfg := llm.DecomposeConfig{Text: boolPtr(true)}
-	calls := DecomposeResponse(resp, "s", cfg)
+	calls := decomposeResponse(resp, "s", cfg)
 
 	for i, c := range calls {
 		if c.Context.Direction != "response" {

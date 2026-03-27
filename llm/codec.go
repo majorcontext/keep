@@ -84,6 +84,10 @@ type StreamResult struct {
 	// Useful for logging/debugging the complete response after policy.
 	// For Deny decisions, this is nil.
 	Body []byte
+	// RawBody is the reassembled response JSON before policy evaluation.
+	// Consumers can use this for pre-policy logging without re-reassembling
+	// the stream. For Deny decisions, this is still populated.
+	RawBody []byte
 	// Audits contains one AuditEntry per decomposed call that was evaluated.
 	Audits []keep.AuditEntry
 }

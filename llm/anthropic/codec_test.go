@@ -127,9 +127,9 @@ func TestCodec_ReassembleStream(t *testing.T) {
 		Usage: &Usage{InputTokens: 10, OutputTokens: 5},
 	}
 
-	events := SynthesizeEvents(resp)
+	events := synthesizeEvents(resp)
 	if len(events) == 0 {
-		t.Fatal("expected non-empty events from SynthesizeEvents")
+		t.Fatal("expected non-empty events from synthesizeEvents")
 	}
 
 	c := NewCodec()

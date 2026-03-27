@@ -20,7 +20,7 @@ func NewCodec() *Codec { return &Codec{} }
 type requestHandle struct {
 	req      *MessagesRequest
 	body     []byte
-	blockMap []BlockPosition
+	blockMap []blockPosition
 	cfg      llm.DecomposeConfig
 }
 
@@ -28,7 +28,7 @@ type requestHandle struct {
 type responseHandle struct {
 	resp     *MessagesResponse
 	body     []byte
-	blockMap []BlockPosition
+	blockMap []blockPosition
 	cfg      llm.DecomposeConfig
 }
 
@@ -40,8 +40,8 @@ func (c *Codec) DecomposeRequest(body []byte, scope string, cfg llm.DecomposeCon
 		return nil, nil, fmt.Errorf("anthropic: unmarshal request: %w", err)
 	}
 
-	calls := DecomposeRequest(&req, scope, cfg)
-	blockMap := WalkRequestBlocks(&req, cfg)
+	calls := decomposeRequest(&req, scope, cfg)
+	blockMap := walkRequestBlocks(&req, cfg)
 
 	h := &requestHandle{
 		req:      &req,
@@ -60,8 +60,8 @@ func (c *Codec) DecomposeResponse(body []byte, scope string, cfg llm.DecomposeCo
 		return nil, nil, fmt.Errorf("anthropic: unmarshal response: %w", err)
 	}
 
-	calls := DecomposeResponse(&resp, scope, cfg)
-	blockMap := WalkResponseBlocks(&resp, cfg)
+	calls := decomposeResponse(&resp, scope, cfg)
+	blockMap := walkResponseBlocks(&resp, cfg)
 
 	h := &responseHandle{
 		resp:     &resp,
@@ -85,7 +85,7 @@ func (c *Codec) ReassembleRequest(handle any, results []keep.EvalResult) ([]byte
 		return h.body, nil
 	}
 
-	patched := ReassembleRequest(h.req, blockResults)
+	patched := reassembleRequest(h.req, blockResults)
 	out, err := json.Marshal(patched)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: marshal patched request: %w", err)
@@ -106,7 +106,7 @@ func (c *Codec) ReassembleResponse(handle any, results []keep.EvalResult) ([]byt
 		return h.body, nil
 	}
 
-	patched := ReassembleResponse(h.resp, blockResults)
+	patched := reassembleResponse(h.resp, blockResults)
 	out, err := json.Marshal(patched)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: marshal patched response: %w", err)
@@ -116,7 +116,7 @@ func (c *Codec) ReassembleResponse(handle any, results []keep.EvalResult) ([]byt
 
 // ReassembleStream reassembles SSE events into a complete response body.
 func (c *Codec) ReassembleStream(events []sse.Event) ([]byte, error) {
-	resp, err := ReassembleFromEvents(events)
+	resp, err := reassembleFromEvents(events)
 	if err != nil {
 		return nil, fmt.Errorf("anthropic: reassemble stream: %w", err)
 	}
@@ -133,19 +133,19 @@ func (c *Codec) SynthesizeEvents(patchedBody []byte) ([]sse.Event, error) {
 	if err := json.Unmarshal(patchedBody, &resp); err != nil {
 		return nil, fmt.Errorf("anthropic: unmarshal for synthesize: %w", err)
 	}
-	return SynthesizeEvents(&resp), nil
+	return synthesizeEvents(&resp), nil
 }
 
 // buildBlockResults maps eval results back to block positions using CallIndex.
 // The offset for summary calls is already baked into BlockPosition.CallIndex
 // by WalkRequestBlocks / WalkResponseBlocks.
-func buildBlockResults(blockMap []BlockPosition, results []keep.EvalResult) []BlockResult {
-	out := make([]BlockResult, 0, len(blockMap))
+func buildBlockResults(blockMap []blockPosition, results []keep.EvalResult) []blockResult {
+	out := make([]blockResult, 0, len(blockMap))
 	for _, pos := range blockMap {
 		if pos.CallIndex < 0 || pos.CallIndex >= len(results) {
 			continue
 		}
-		out = append(out, BlockResult{
+		out = append(out, blockResult{
 			MessageIndex: pos.MessageIndex,
 			BlockIndex:   pos.BlockIndex,
 			Result:       results[pos.CallIndex],
@@ -155,7 +155,7 @@ func buildBlockResults(blockMap []BlockPosition, results []keep.EvalResult) []Bl
 }
 
 // hasMutations reports whether any block result contains mutations.
-func hasMutations(results []BlockResult) bool {
+func hasMutations(results []blockResult) bool {
 	for _, br := range results {
 		if len(br.Result.Mutations) > 0 {
 			return true

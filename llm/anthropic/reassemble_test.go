@@ -6,7 +6,7 @@ import (
 	keep "github.com/majorcontext/keep"
 )
 
-// --- ReassembleRequest tests ---
+// --- reassembleRequest tests ---
 
 func TestReassembleRequest_NoMutations(t *testing.T) {
 	req := &MessagesRequest{
@@ -21,7 +21,7 @@ func TestReassembleRequest_NoMutations(t *testing.T) {
 		},
 	}
 
-	results := []BlockResult{
+	results := []blockResult{
 		{
 			MessageIndex: 0,
 			BlockIndex:   0,
@@ -29,7 +29,7 @@ func TestReassembleRequest_NoMutations(t *testing.T) {
 		},
 	}
 
-	got := ReassembleRequest(req, results)
+	got := reassembleRequest(req, results)
 	blocks := got.Messages[0].ContentBlocks()
 	if len(blocks) == 0 {
 		t.Fatal("expected content blocks")
@@ -52,7 +52,7 @@ func TestReassembleRequest_RedactToolResult(t *testing.T) {
 		},
 	}
 
-	results := []BlockResult{
+	results := []blockResult{
 		{
 			MessageIndex: 0,
 			BlockIndex:   0,
@@ -65,7 +65,7 @@ func TestReassembleRequest_RedactToolResult(t *testing.T) {
 		},
 	}
 
-	got := ReassembleRequest(req, results)
+	got := reassembleRequest(req, results)
 	blocks := got.Messages[0].ContentBlocks()
 	if len(blocks) == 0 {
 		t.Fatal("expected content blocks")
@@ -95,7 +95,7 @@ func TestReassembleRequest_MultipleMutations(t *testing.T) {
 		},
 	}
 
-	results := []BlockResult{
+	results := []blockResult{
 		{
 			MessageIndex: 0,
 			BlockIndex:   0,
@@ -118,7 +118,7 @@ func TestReassembleRequest_MultipleMutations(t *testing.T) {
 		},
 	}
 
-	got := ReassembleRequest(req, results)
+	got := reassembleRequest(req, results)
 
 	blocks0 := got.Messages[0].ContentBlocks()
 	if blocks0[0].ToolResultContent() != "[REDACTED-A]" {
@@ -144,7 +144,7 @@ func TestReassembleRequest_OriginalUnmodified(t *testing.T) {
 		},
 	}
 
-	results := []BlockResult{
+	results := []blockResult{
 		{
 			MessageIndex: 0,
 			BlockIndex:   0,
@@ -157,7 +157,7 @@ func TestReassembleRequest_OriginalUnmodified(t *testing.T) {
 		},
 	}
 
-	_ = ReassembleRequest(req, results)
+	_ = reassembleRequest(req, results)
 
 	// The original must remain unchanged.
 	blocks := req.Messages[0].ContentBlocks()
@@ -166,7 +166,7 @@ func TestReassembleRequest_OriginalUnmodified(t *testing.T) {
 	}
 }
 
-// --- ReassembleResponse tests ---
+// --- reassembleResponse tests ---
 
 func TestReassembleResponse_NoMutations(t *testing.T) {
 	resp := &MessagesResponse{
@@ -177,14 +177,14 @@ func TestReassembleResponse_NoMutations(t *testing.T) {
 		},
 	}
 
-	results := []BlockResult{
+	results := []blockResult{
 		{
 			BlockIndex: 0,
 			Result:     keep.EvalResult{Decision: keep.Allow},
 		},
 	}
 
-	got := ReassembleResponse(resp, results)
+	got := reassembleResponse(resp, results)
 	if got.Content[0].Text != "Hello, world!" {
 		t.Errorf("expected 'Hello, world!', got %q", got.Content[0].Text)
 	}
@@ -204,7 +204,7 @@ func TestReassembleResponse_RedactToolUseInput(t *testing.T) {
 		},
 	}
 
-	results := []BlockResult{
+	results := []blockResult{
 		{
 			BlockIndex: 0,
 			Result: keep.EvalResult{
@@ -216,7 +216,7 @@ func TestReassembleResponse_RedactToolUseInput(t *testing.T) {
 		},
 	}
 
-	got := ReassembleResponse(resp, results)
+	got := reassembleResponse(resp, results)
 	cmd, ok := got.Content[0].Input["command"]
 	if !ok {
 		t.Fatal("expected 'command' key in Input")

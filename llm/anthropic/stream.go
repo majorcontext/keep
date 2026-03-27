@@ -9,10 +9,10 @@ import (
 	"github.com/majorcontext/keep/sse"
 )
 
-// ReassembleFromEvents builds a MessagesResponse from a sequence of Anthropic
+// reassembleFromEvents builds a MessagesResponse from a sequence of Anthropic
 // streaming SSE events. It accumulates text deltas and input_json_delta fragments
 // into complete content blocks.
-func ReassembleFromEvents(events []sse.Event) (*MessagesResponse, error) {
+func reassembleFromEvents(events []sse.Event) (*MessagesResponse, error) {
 	var resp *MessagesResponse
 	var blocks []ContentBlock
 	inputJSON := make(map[int]*strings.Builder)
@@ -126,10 +126,10 @@ func ReassembleFromEvents(events []sse.Event) (*MessagesResponse, error) {
 	return resp, nil
 }
 
-// SynthesizeEvents produces a minimal valid Anthropic SSE event sequence
+// synthesizeEvents produces a minimal valid Anthropic SSE event sequence
 // from a MessagesResponse. Each content block gets one start + one delta + one stop.
 // This is used when the response was redacted and the original events can't be replayed.
-func SynthesizeEvents(resp *MessagesResponse) []sse.Event {
+func synthesizeEvents(resp *MessagesResponse) []sse.Event {
 	var events []sse.Event
 
 	// message_start: use a raw map so stop_reason serializes as null (not "").
