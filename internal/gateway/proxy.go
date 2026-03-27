@@ -17,7 +17,7 @@ import (
 	"github.com/majorcontext/keep/internal/audit"
 	"github.com/majorcontext/keep/internal/gateway/anthropic"
 	gwconfig "github.com/majorcontext/keep/internal/gateway/config"
-	"github.com/majorcontext/keep/internal/sse"
+	"github.com/majorcontext/keep/sse"
 )
 
 // maxRequestBodySize is the maximum size of a request body we will read (4 MB).

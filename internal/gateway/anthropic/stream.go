@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/majorcontext/keep/internal/sse"
+	"github.com/majorcontext/keep/sse"
 )
 
 // ReassembleFromEvents builds a MessagesResponse from a sequence of Anthropic

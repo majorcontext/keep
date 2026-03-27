@@ -14,7 +14,7 @@ import (
 	"github.com/majorcontext/keep/internal/audit"
 	"github.com/majorcontext/keep/internal/gateway/anthropic"
 	gwconfig "github.com/majorcontext/keep/internal/gateway/config"
-	"github.com/majorcontext/keep/internal/sse"
+	"github.com/majorcontext/keep/sse"
 )
 
 // newTestEngine loads the test-gateway rules and returns a ready engine.

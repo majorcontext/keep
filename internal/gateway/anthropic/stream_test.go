@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/majorcontext/keep/internal/sse"
+	"github.com/majorcontext/keep/sse"
 )
 
 func TestReassembleFromEvents_TextOnly(t *testing.T) {
