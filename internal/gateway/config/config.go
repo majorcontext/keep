@@ -7,6 +7,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	keepconfig "github.com/majorcontext/keep/internal/config"
+	"github.com/majorcontext/keep/llm"
 )
 
 // GatewayConfig holds the top-level gateway configuration.
@@ -29,6 +30,17 @@ type DecomposeConfig struct {
 	Text            *bool `yaml:"text,omitempty"`
 	RequestSummary  *bool `yaml:"request_summary,omitempty"`
 	ResponseSummary *bool `yaml:"response_summary,omitempty"`
+}
+
+// ToLLM converts a gateway DecomposeConfig to the public llm.DecomposeConfig.
+func (d DecomposeConfig) ToLLM() llm.DecomposeConfig {
+	return llm.DecomposeConfig{
+		ToolResult:      d.ToolResult,
+		ToolUse:         d.ToolUse,
+		Text:            d.Text,
+		RequestSummary:  d.RequestSummary,
+		ResponseSummary: d.ResponseSummary,
+	}
 }
 
 // ToolResultEnabled returns whether tool_result decomposition is enabled (default: true).

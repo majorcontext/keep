@@ -34,15 +34,16 @@ const maxSSEEvents = 10000
 
 // Proxy is the LLM gateway HTTP handler.
 type Proxy struct {
-	engine    *keep.Engine
-	scope     string
-	upstream  *url.URL
-	decompose gwconfig.DecomposeConfig
-	logger    *audit.Logger
-	debug     *slog.Logger
-	verbose   *VerboseWriter
-	passthru  *httputil.ReverseProxy // for non-messages passthrough
-	client    *http.Client           // for /v1/messages upstream requests
+	engine   *keep.Engine
+	scope    string
+	upstream *url.URL
+	codec    llm.Codec
+	llmCfg   llm.DecomposeConfig
+	logger   *audit.Logger
+	debug    *slog.Logger
+	verbose  *VerboseWriter
+	passthru *httputil.ReverseProxy // for non-messages passthrough
+	client   *http.Client           // for /v1/messages upstream requests
 }
 
 // NewProxy creates an LLM gateway proxy.
@@ -55,12 +56,13 @@ func NewProxy(engine *keep.Engine, cfg *gwconfig.GatewayConfig, logger *audit.Lo
 	rp := httputil.NewSingleHostReverseProxy(upstream)
 
 	p := &Proxy{
-		engine:    engine,
-		scope:     cfg.Scope,
-		upstream:  upstream,
-		decompose: cfg.Decompose,
-		logger:    logger,
-		passthru:  rp,
+		engine:   engine,
+		scope:    cfg.Scope,
+		upstream: upstream,
+		codec:    anthropic.NewCodec(),
+		llmCfg:   cfg.Decompose.ToLLM(),
+		logger:   logger,
+		passthru: rp,
 		// 110s client timeout is less than the server's 120s WriteTimeout,
 		// ensuring the upstream error response has time to be written back
 		// before the server closes the connection.
@@ -147,7 +149,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Evaluate request policy.
-	evalResult, err := p.evaluateRequestPolicy(w, req, body)
+	evalResult, err := p.evaluateRequestPolicy(w, body)
 	if err != nil {
 		return // error (or deny) already written to w
 	}
@@ -216,90 +218,38 @@ type requestPolicyResult struct {
 // evaluateRequestPolicy decomposes the request, evaluates each call against policy,
 // and reassembles the request body if any redactions were applied.
 // On deny or error, it writes the appropriate response to w and returns a non-nil error.
-func (p *Proxy) evaluateRequestPolicy(w http.ResponseWriter, req *anthropic.MessagesRequest, body []byte) (*requestPolicyResult, error) {
-	// Decompose request into calls.
-	calls := anthropic.DecomposeRequest(req, p.scope, toLLMDecompose(p.decompose))
-
-	// Evaluate each call. Track block results for reassembly.
-	// DecomposeRequest emits: optional summary call, then one call per content block.
-	// We need to map the content-block calls back to (MessageIndex, BlockIndex).
-	summaryOffset := 0
-	if p.decompose.RequestSummaryEnabled() && len(calls) > 0 {
-		summaryOffset = 1
+func (p *Proxy) evaluateRequestPolicy(w http.ResponseWriter, body []byte) (*requestPolicyResult, error) {
+	result, err := llm.EvaluateRequest(p.engine, p.codec, body, p.scope, p.llmCfg)
+	if err != nil {
+		writeInternalError(w, "policy evaluation error")
+		return nil, err
 	}
 
-	// Build the block index mapping by re-walking messages (same order as DecomposeRequest).
-	blockMap := buildRequestBlockMap(req, toLLMDecompose(p.decompose))
-
-	hasRedaction := false
-	blockResults := make([]anthropic.BlockResult, len(blockMap))
-
-	var redactedRules []string
-	for i, call := range calls {
-		result, evalErr := p.engine.Evaluate(call, p.scope)
-		if evalErr != nil {
-			writeInternalError(w, "policy evaluation error")
-			return nil, evalErr
-		}
-
-		// Log audit entry.
-		if p.logger != nil {
-			p.logger.Log(result.Audit)
-		}
-
-		// Check for deny.
-		if result.Decision == keep.Deny {
-			p.logDebug("request denied", "rule", result.Rule, "message", result.Message)
-			if p.verbose != nil {
-				p.verbose.RequestDenied(result.Rule, result.Message)
-			}
-			writePolicyDeny(w, result.Rule, result.Message)
-			return nil, fmt.Errorf("policy denied: %s", result.Rule)
-		}
-
-		// Track redactions for content blocks (skip the summary call).
-		if i >= summaryOffset {
-			blockIdx := i - summaryOffset
-			if blockIdx < len(blockResults) {
-				blockResults[blockIdx].MessageIndex = blockMap[blockIdx].MessageIndex
-				blockResults[blockIdx].BlockIndex = blockMap[blockIdx].BlockIndex
-				blockResults[blockIdx].Result = result
-				if result.Decision == keep.Redact {
-					hasRedaction = true
-					redactedRules = append(redactedRules, result.Rule)
-				}
-			}
+	// Log all audit entries.
+	if p.logger != nil {
+		for _, a := range result.Audits {
+			p.logger.Log(a)
 		}
 	}
 
-	p.logDebug("request policy",
-		"calls", len(calls),
-		"redacted", hasRedaction,
-		"redacted_rules", strings.Join(redactedRules, ","),
-	)
-
-	// Reassemble if redacted.
-	forwardBody := body
-	if hasRedaction {
-		patched := anthropic.ReassembleRequest(req, blockResults)
-		var err error
-		forwardBody, err = json.Marshal(patched)
-		if err != nil {
-			writeInternalError(w, "failed to marshal patched request")
-			return nil, err
+	if result.Decision == keep.Deny {
+		p.logDebug("request denied", "rule", result.Rule, "message", result.Message)
+		if p.verbose != nil {
+			p.verbose.RequestDenied(result.Rule, result.Message)
 		}
+		writePolicyDeny(w, result.Rule, result.Message)
+		return nil, fmt.Errorf("policy denied: %s", result.Rule)
 	}
 
-	// Verbose: log post-policy request.
 	if p.verbose != nil {
-		if hasRedaction {
-			p.verbose.RequestAfterPolicy(forwardBody, strings.Join(redactedRules, ", "))
+		if result.Decision == keep.Redact {
+			p.verbose.RequestAfterPolicy(result.Body, result.Rule)
 		} else {
 			p.verbose.RequestAllowed()
 		}
 	}
 
-	return &requestPolicyResult{forwardBody: forwardBody}, nil
+	return &requestPolicyResult{forwardBody: result.Body}, nil
 }
 
 // handleNonStreamingResponse forwards the request to upstream, reads the response,
@@ -343,83 +293,31 @@ func (p *Proxy) handleNonStreamingResponse(w http.ResponseWriter, r *http.Reques
 		p.verbose.ResponseRaw(respBody)
 	}
 
-	// Parse as MessagesResponse.
-	var resp anthropic.MessagesResponse
-	if err := json.Unmarshal(respBody, &resp); err != nil {
-		// Can't parse response; pass through as-is.
-		copyResponseHeaders(w, upstreamResp)
-		w.WriteHeader(upstreamResp.StatusCode)
-		_, _ = w.Write(respBody)
+	// Evaluate response policy via pipeline.
+	result, err := llm.EvaluateResponse(p.engine, p.codec, respBody, p.scope, p.llmCfg)
+	if err != nil {
+		writeInternalError(w, "response policy evaluation error")
 		return
 	}
-
-	// Decompose response.
-	respCalls := anthropic.DecomposeResponse(&resp, p.scope, toLLMDecompose(p.decompose))
-
-	// Evaluate response calls.
-	respSummaryOffset := 0
-	if p.decompose.ResponseSummaryEnabled() && len(respCalls) > 0 {
-		respSummaryOffset = 1
-	}
-
-	// Build response block index mapping using WalkResponseBlocks (same order as DecomposeResponse).
-	respBlockMap := anthropic.WalkResponseBlocks(&resp, toLLMDecompose(p.decompose))
-
-	var respBlockResults []anthropic.BlockResult
-	respHasRedaction := false
-
-	for i, call := range respCalls {
-		result, evalErr := p.engine.Evaluate(call, p.scope)
-		if evalErr != nil {
-			writeInternalError(w, "response policy evaluation error")
-			return
-		}
-
-		if p.logger != nil {
-			p.logger.Log(result.Audit)
-		}
-
-		// Check for deny.
-		if result.Decision == keep.Deny {
-			p.logDebug("response denied", "rule", result.Rule, "message", result.Message)
-			if p.verbose != nil {
-				p.verbose.ResponseDenied(result.Rule, result.Message)
-			}
-			writePolicyDeny(w, result.Rule, result.Message)
-			return
-		}
-
-		if i >= respSummaryOffset {
-			blockIdx := i - respSummaryOffset
-			if blockIdx < len(respBlockMap) {
-				if result.Decision == keep.Redact {
-					respHasRedaction = true
-				}
-				respBlockResults = append(respBlockResults, anthropic.BlockResult{
-					BlockIndex: respBlockMap[blockIdx].BlockIndex,
-					Result:     result,
-				})
-			}
+	if p.logger != nil {
+		for _, a := range result.Audits {
+			p.logger.Log(a)
 		}
 	}
-
-	p.logDebug("response policy", "status", upstreamResp.StatusCode, "calls", len(respCalls), "redacted", respHasRedaction)
-
-	// Reassemble if redacted.
-	finalBody := respBody
-	if respHasRedaction {
-		patched := anthropic.ReassembleResponse(&resp, respBlockResults)
-		finalBody, err = json.Marshal(patched)
-		if err != nil {
-			writeInternalError(w, "failed to marshal patched response")
-			return
+	if result.Decision == keep.Deny {
+		p.logDebug("response denied", "rule", result.Rule, "message", result.Message)
+		if p.verbose != nil {
+			p.verbose.ResponseDenied(result.Rule, result.Message)
 		}
+		writePolicyDeny(w, result.Rule, result.Message)
+		return
 	}
+	finalBody := result.Body
 
 	// Verbose: log post-policy response.
 	if p.verbose != nil {
-		if respHasRedaction {
-			p.verbose.ResponseAfterPolicy(finalBody, "")
+		if result.Decision == keep.Redact {
+			p.verbose.ResponseAfterPolicy(finalBody, result.Rule)
 		} else {
 			p.verbose.ResponseAllowed()
 		}
@@ -429,38 +327,6 @@ func (p *Proxy) handleNonStreamingResponse(w http.ResponseWriter, r *http.Reques
 	copyResponseHeaders(w, upstreamResp)
 	w.WriteHeader(upstreamResp.StatusCode)
 	_, _ = w.Write(finalBody)
-}
-
-// blockPosition maps a decomposed call index to its message and block position.
-type blockPosition struct {
-	MessageIndex int
-	BlockIndex   int
-}
-
-// buildRequestBlockMap walks the request messages in the same order as DecomposeRequest
-// and returns the (MessageIndex, BlockIndex) for each content-block call.
-// Uses the shared WalkRequestBlocks iterator to ensure consistent traversal.
-func buildRequestBlockMap(req *anthropic.MessagesRequest, cfg llm.DecomposeConfig) []blockPosition {
-	walked := anthropic.WalkRequestBlocks(req, cfg)
-	positions := make([]blockPosition, len(walked))
-	for i, pos := range walked {
-		positions[i] = blockPosition{
-			MessageIndex: pos.MessageIndex,
-			BlockIndex:   pos.BlockIndex,
-		}
-	}
-	return positions
-}
-
-// toLLMDecompose converts a gateway DecomposeConfig to the public llm.DecomposeConfig.
-func toLLMDecompose(cfg gwconfig.DecomposeConfig) llm.DecomposeConfig {
-	return llm.DecomposeConfig{
-		ToolResult:      cfg.ToolResult,
-		ToolUse:         cfg.ToolUse,
-		Text:            cfg.Text,
-		RequestSummary:  cfg.RequestSummary,
-		ResponseSummary: cfg.ResponseSummary,
-	}
 }
 
 // handleStreamingResponse handles the upstream call and response for streaming requests.
@@ -522,87 +388,41 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 
 	p.logDebug("upstream stream", "status", upstreamResp.StatusCode, "events", len(events))
 
-	// 4. Reassemble into MessagesResponse.
-	resp, err := anthropic.ReassembleFromEvents(events)
+	// 4. Evaluate stream via pipeline (reassemble, decompose, evaluate, reassemble/synthesize).
+	// Verbose: log reassembled response before policy.
+	if p.verbose != nil {
+		// Reassemble just for logging — the pipeline will do it again internally.
+		if assembled, logErr := p.codec.ReassembleStream(events); logErr == nil {
+			p.verbose.ResponseRaw(assembled)
+		}
+	}
+
+	streamResult, err := llm.EvaluateStream(p.engine, p.codec, events, p.scope, p.llmCfg)
 	if err != nil {
-		writeInternalError(w, "failed to reassemble streaming response")
+		writeInternalError(w, "stream policy evaluation error")
 		return
 	}
-
-	// Verbose: log reassembled response.
+	if p.logger != nil {
+		for _, a := range streamResult.Audits {
+			p.logger.Log(a)
+		}
+	}
+	if streamResult.Decision == keep.Deny {
+		p.logDebug("stream denied", "rule", streamResult.Rule, "message", streamResult.Message)
+		if p.verbose != nil {
+			p.verbose.ResponseDenied(streamResult.Rule, streamResult.Message)
+		}
+		writePolicyDeny(w, streamResult.Rule, streamResult.Message)
+		return
+	}
 	if p.verbose != nil {
-		assembled, _ := json.Marshal(resp)
-		p.verbose.ResponseRaw(assembled)
-	}
-
-	// 5. Decompose and evaluate response policy.
-	respCalls := anthropic.DecomposeResponse(resp, p.scope, toLLMDecompose(p.decompose))
-
-	respSummaryOffset := 0
-	if p.decompose.ResponseSummaryEnabled() && len(respCalls) > 0 {
-		respSummaryOffset = 1
-	}
-
-	// Build response block index mapping using WalkResponseBlocks (same order as DecomposeResponse).
-	respBlockMap := anthropic.WalkResponseBlocks(resp, toLLMDecompose(p.decompose))
-
-	var respBlockResults []anthropic.BlockResult
-	respHasRedaction := false
-
-	for i, call := range respCalls {
-		result, evalErr := p.engine.Evaluate(call, p.scope)
-		if evalErr != nil {
-			writeInternalError(w, "response policy evaluation error")
-			return
-		}
-
-		if p.logger != nil {
-			p.logger.Log(result.Audit)
-		}
-
-		if result.Decision == keep.Deny {
-			p.logDebug("response denied", "rule", result.Rule, "message", result.Message)
-			if p.verbose != nil {
-				p.verbose.ResponseDenied(result.Rule, result.Message)
-			}
-			writePolicyDeny(w, result.Rule, result.Message)
-			return
-		}
-
-		if i >= respSummaryOffset {
-			blockIdx := i - respSummaryOffset
-			if blockIdx < len(respBlockMap) {
-				if result.Decision == keep.Redact {
-					respHasRedaction = true
-				}
-				respBlockResults = append(respBlockResults, anthropic.BlockResult{
-					BlockIndex: respBlockMap[blockIdx].BlockIndex,
-					Result:     result,
-				})
-			}
-		}
-	}
-
-	p.logDebug("response policy", "calls", len(respCalls), "redacted", respHasRedaction)
-
-	// 6. Determine which events to send.
-	var outEvents []sse.Event
-	if respHasRedaction {
-		patched := anthropic.ReassembleResponse(resp, respBlockResults)
-		outEvents = anthropic.SynthesizeEvents(patched)
-	} else {
-		outEvents = events
-	}
-
-	// Verbose: log post-policy response.
-	if p.verbose != nil {
-		if respHasRedaction {
-			assembled, _ := json.Marshal(anthropic.ReassembleResponse(resp, respBlockResults))
-			p.verbose.ResponseAfterPolicy(assembled, "")
+		if streamResult.Decision == keep.Redact {
+			p.verbose.ResponseAfterPolicy(streamResult.Body, streamResult.Rule)
 		} else {
 			p.verbose.ResponseAllowed()
 		}
 	}
+	outEvents := streamResult.Events
 
 	// 7. Stream events to client.
 	sseWriter, err := sse.NewWriter(w)

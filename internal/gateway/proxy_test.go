@@ -784,8 +784,8 @@ func TestProxy_StreamingMalformedEvents(t *testing.T) {
 	if errResp.Error.Type != "internal_error" {
 		t.Errorf("expected internal_error, got %s", errResp.Error.Type)
 	}
-	if !strings.Contains(errResp.Error.Message, "reassemble") {
-		t.Errorf("expected reassembly error message, got %q", errResp.Error.Message)
+	if !strings.Contains(errResp.Error.Message, "stream policy evaluation error") {
+		t.Errorf("expected stream policy evaluation error message, got %q", errResp.Error.Message)
 	}
 }
 
