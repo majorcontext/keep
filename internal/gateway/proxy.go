@@ -15,8 +15,9 @@ import (
 
 	"github.com/majorcontext/keep"
 	"github.com/majorcontext/keep/internal/audit"
-	"github.com/majorcontext/keep/internal/gateway/anthropic"
 	gwconfig "github.com/majorcontext/keep/internal/gateway/config"
+	"github.com/majorcontext/keep/llm"
+	"github.com/majorcontext/keep/llm/anthropic"
 	"github.com/majorcontext/keep/sse"
 )
 
@@ -217,7 +218,7 @@ type requestPolicyResult struct {
 // On deny or error, it writes the appropriate response to w and returns a non-nil error.
 func (p *Proxy) evaluateRequestPolicy(w http.ResponseWriter, req *anthropic.MessagesRequest, body []byte) (*requestPolicyResult, error) {
 	// Decompose request into calls.
-	calls := anthropic.DecomposeRequest(req, p.scope, p.decompose)
+	calls := anthropic.DecomposeRequest(req, p.scope, toLLMDecompose(p.decompose))
 
 	// Evaluate each call. Track block results for reassembly.
 	// DecomposeRequest emits: optional summary call, then one call per content block.
@@ -228,7 +229,7 @@ func (p *Proxy) evaluateRequestPolicy(w http.ResponseWriter, req *anthropic.Mess
 	}
 
 	// Build the block index mapping by re-walking messages (same order as DecomposeRequest).
-	blockMap := buildRequestBlockMap(req, p.decompose)
+	blockMap := buildRequestBlockMap(req, toLLMDecompose(p.decompose))
 
 	hasRedaction := false
 	blockResults := make([]anthropic.BlockResult, len(blockMap))
@@ -353,7 +354,7 @@ func (p *Proxy) handleNonStreamingResponse(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Decompose response.
-	respCalls := anthropic.DecomposeResponse(&resp, p.scope, p.decompose)
+	respCalls := anthropic.DecomposeResponse(&resp, p.scope, toLLMDecompose(p.decompose))
 
 	// Evaluate response calls.
 	respSummaryOffset := 0
@@ -362,7 +363,7 @@ func (p *Proxy) handleNonStreamingResponse(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Build response block index mapping using WalkResponseBlocks (same order as DecomposeResponse).
-	respBlockMap := anthropic.WalkResponseBlocks(&resp, p.decompose)
+	respBlockMap := anthropic.WalkResponseBlocks(&resp, toLLMDecompose(p.decompose))
 
 	var respBlockResults []anthropic.BlockResult
 	respHasRedaction := false
@@ -439,7 +440,7 @@ type blockPosition struct {
 // buildRequestBlockMap walks the request messages in the same order as DecomposeRequest
 // and returns the (MessageIndex, BlockIndex) for each content-block call.
 // Uses the shared WalkRequestBlocks iterator to ensure consistent traversal.
-func buildRequestBlockMap(req *anthropic.MessagesRequest, cfg gwconfig.DecomposeConfig) []blockPosition {
+func buildRequestBlockMap(req *anthropic.MessagesRequest, cfg llm.DecomposeConfig) []blockPosition {
 	walked := anthropic.WalkRequestBlocks(req, cfg)
 	positions := make([]blockPosition, len(walked))
 	for i, pos := range walked {
@@ -449,6 +450,17 @@ func buildRequestBlockMap(req *anthropic.MessagesRequest, cfg gwconfig.Decompose
 		}
 	}
 	return positions
+}
+
+// toLLMDecompose converts a gateway DecomposeConfig to the public llm.DecomposeConfig.
+func toLLMDecompose(cfg gwconfig.DecomposeConfig) llm.DecomposeConfig {
+	return llm.DecomposeConfig{
+		ToolResult:      cfg.ToolResult,
+		ToolUse:         cfg.ToolUse,
+		Text:            cfg.Text,
+		RequestSummary:  cfg.RequestSummary,
+		ResponseSummary: cfg.ResponseSummary,
+	}
 }
 
 // handleStreamingResponse handles the upstream call and response for streaming requests.
@@ -524,7 +536,7 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// 5. Decompose and evaluate response policy.
-	respCalls := anthropic.DecomposeResponse(resp, p.scope, p.decompose)
+	respCalls := anthropic.DecomposeResponse(resp, p.scope, toLLMDecompose(p.decompose))
 
 	respSummaryOffset := 0
 	if p.decompose.ResponseSummaryEnabled() && len(respCalls) > 0 {
@@ -532,7 +544,7 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 	}
 
 	// Build response block index mapping using WalkResponseBlocks (same order as DecomposeResponse).
-	respBlockMap := anthropic.WalkResponseBlocks(resp, p.decompose)
+	respBlockMap := anthropic.WalkResponseBlocks(resp, toLLMDecompose(p.decompose))
 
 	var respBlockResults []anthropic.BlockResult
 	respHasRedaction := false

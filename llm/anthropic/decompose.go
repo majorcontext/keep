@@ -5,7 +5,7 @@ import (
 	"strings"
 
 	keep "github.com/majorcontext/keep"
-	"github.com/majorcontext/keep/internal/gateway/config"
+	"github.com/majorcontext/keep/llm"
 )
 
 // BlockPosition identifies a content block within a request.
@@ -18,7 +18,7 @@ type BlockPosition struct {
 }
 
 // WalkRequestBlocks returns the positions of all blocks that DecomposeRequest would emit calls for.
-func WalkRequestBlocks(req *MessagesRequest, cfg config.DecomposeConfig) []BlockPosition {
+func WalkRequestBlocks(req *MessagesRequest, cfg llm.DecomposeConfig) []BlockPosition {
 	var positions []BlockPosition
 	callIdx := 0
 	if cfg.RequestSummaryEnabled() {
@@ -59,7 +59,7 @@ func WalkRequestBlocks(req *MessagesRequest, cfg config.DecomposeConfig) []Block
 }
 
 // WalkResponseBlocks returns the positions of all blocks that DecomposeResponse would emit calls for.
-func WalkResponseBlocks(resp *MessagesResponse, cfg config.DecomposeConfig) []BlockPosition {
+func WalkResponseBlocks(resp *MessagesResponse, cfg llm.DecomposeConfig) []BlockPosition {
 	var positions []BlockPosition
 	callIdx := 0
 	if cfg.ResponseSummaryEnabled() {
@@ -98,7 +98,7 @@ func WalkResponseBlocks(resp *MessagesResponse, cfg config.DecomposeConfig) []Bl
 
 // DecomposeRequest breaks an Anthropic Messages API request into flat Keep calls.
 // Returns one llm.request summary + one call per content block (based on decompose config).
-func DecomposeRequest(req *MessagesRequest, scope string, cfg config.DecomposeConfig) []keep.Call {
+func DecomposeRequest(req *MessagesRequest, scope string, cfg llm.DecomposeConfig) []keep.Call {
 	var calls []keep.Call
 
 	// Build a map from tool_use_id to tool name for resolving tool_result references.
@@ -149,7 +149,7 @@ func DecomposeRequest(req *MessagesRequest, scope string, cfg config.DecomposeCo
 }
 
 // DecomposeResponse breaks an Anthropic Messages API response into flat Keep calls.
-func DecomposeResponse(resp *MessagesResponse, scope string, cfg config.DecomposeConfig) []keep.Call {
+func DecomposeResponse(resp *MessagesResponse, scope string, cfg llm.DecomposeConfig) []keep.Call {
 	var calls []keep.Call
 
 	// 1. Summary call.

@@ -12,8 +12,8 @@ import (
 
 	"github.com/majorcontext/keep"
 	"github.com/majorcontext/keep/internal/audit"
-	"github.com/majorcontext/keep/internal/gateway/anthropic"
 	gwconfig "github.com/majorcontext/keep/internal/gateway/config"
+	"github.com/majorcontext/keep/llm/anthropic"
 	"github.com/majorcontext/keep/sse"
 )
 

@@ -14,8 +14,8 @@ import (
 	"github.com/majorcontext/keep"
 	"github.com/majorcontext/keep/internal/audit"
 	"github.com/majorcontext/keep/internal/gateway"
-	"github.com/majorcontext/keep/internal/gateway/anthropic"
 	gwconfig "github.com/majorcontext/keep/internal/gateway/config"
+	"github.com/majorcontext/keep/llm/anthropic"
 )
 
 // newE2EEngine loads the test-gateway rules and returns a ready engine.
