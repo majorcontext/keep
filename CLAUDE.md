@@ -43,6 +43,10 @@ make test-unit ARGS='-run TestName ./internal/engine'
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for architecture, testing, and development details.
 
+## Releases
+
+Update CHANGELOG.md **before** tagging and pushing. Order: CHANGELOG commit → tag → push both together. This avoids the tag pointing to a commit that doesn't include its own changelog entry.
+
 ## Superpowers Overrides
 
 - Save specs and plans to `docs/plans/` (not `docs/superpowers/`)
