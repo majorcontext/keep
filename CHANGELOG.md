@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-03
+
+### Added
+
+- `SafeEvaluate()` — wraps `Engine.Evaluate` with panic recovery, fails closed on `Deny`
+- `NewHTTPCall()` — constructs a `Call` for HTTP request policy evaluation (`METHOD host/path` format)
+- `NewMCPCall()` — constructs a `Call` for MCP tool-use policy evaluation
+- `version` field in rule file schema — defaults to `v1` if absent, rejects unknown versions
+- Benchmark suite for engine evaluation (12 sub-benchmarks covering simple match, CEL, globs, redaction, large params)
+- Fuzz tests for rule parsing, CEL compilation, and `ValidateRuleBytes`
+- LLM evaluation library guide
+- v1.0.0 design spec
+
+### Changed
+
+- Centralized version defaulting into `setDefaults` helper in config package
+- `RuleSet.Compile` now sets `Version` on constructed rule files
+
 ## [0.2.0] - 2026-03-26
 
 ### Added
