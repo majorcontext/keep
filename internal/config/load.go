@@ -142,9 +142,7 @@ func LoadRules(dir string) (map[string]*RuleFile, error) {
 			continue
 		}
 
-		if rf.Version == "" {
-			rf.Version = SupportedVersion
-		}
+		setDefaults(&rf)
 
 		if err := Validate(&rf); err != nil {
 			errs = append(errs, fmt.Errorf("loadrules: %s: %w", name, err))

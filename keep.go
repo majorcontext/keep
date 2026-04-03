@@ -274,9 +274,10 @@ func (rs *RuleSet) Compile(opts ...Option) (*Engine, error) {
 
 	rules := rs.buildRules()
 	rf := &config.RuleFile{
-		Scope: rs.scope,
-		Mode:  config.Mode(rs.mode),
-		Rules: rules,
+		Version: config.SupportedVersion,
+		Scope:   rs.scope,
+		Mode:    config.Mode(rs.mode),
+		Rules:   rules,
 	}
 
 	lr := &config.LoadResult{

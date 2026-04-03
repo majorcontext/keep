@@ -54,6 +54,7 @@ func BenchmarkEvaluate(b *testing.B) {
 	b.Run("redaction_regex", benchRedactionRegex)
 	b.Run("large_params", benchLargeParams)
 	b.Run("large_string_value", benchLargeStringValue)
+	b.Run("cel_with_operation", benchCELWithOperation)
 }
 
 // benchSimpleMatch: single rule, exact operation match, no CEL expression.
@@ -291,6 +292,27 @@ func benchLargeParams(b *testing.B) {
 	}
 	params["status"] = "blocked"
 	call := benchCall("update_record", params)
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		ev.Evaluate(call)
+	}
+}
+
+// benchCELWithOperation: rule with both an Operation pattern and a When CEL clause,
+// which is the common real-world pattern.
+func benchCELWithOperation(b *testing.B) {
+	b.ReportAllocs()
+	rules := []config.Rule{
+		{
+			Name:    "block-large-create",
+			Action:  config.ActionDeny,
+			Match:   config.Match{Operation: "create_*", When: "params.size > 1000"},
+			Message: "large creates not allowed",
+		},
+	}
+	ev := benchEvaluator(b, rules)
+	call := benchCall("create_issue", map[string]any{"size": int64(2000)})
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

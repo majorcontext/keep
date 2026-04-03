@@ -83,6 +83,13 @@ type Profile struct {
 	Aliases map[string]string `yaml:"aliases"`
 }
 
+// setDefaults fills in zero-value fields with their defaults.
+func setDefaults(rf *RuleFile) {
+	if rf.Version == "" {
+		rf.Version = SupportedVersion
+	}
+}
+
 // StarterPack is a reusable set of rules.
 type StarterPack struct {
 	Name    string `yaml:"name"`
