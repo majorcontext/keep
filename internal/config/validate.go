@@ -21,6 +21,11 @@ const (
 func Validate(rf *RuleFile) error {
 	var errs []error
 
+	// 0. version must be supported
+	if rf.Version != "" && rf.Version != SupportedVersion {
+		errs = append(errs, fmt.Errorf("unsupported rule file version %q (supported: %s)", rf.Version, SupportedVersion))
+	}
+
 	// 1. scope is required and non-empty
 	if rf.Scope == "" {
 		errs = append(errs, errors.New("scope: required and must not be empty"))

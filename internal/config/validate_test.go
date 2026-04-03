@@ -548,6 +548,32 @@ func TestValidate_RedactNoSecretsNoPatterns(t *testing.T) {
 	}
 }
 
+func TestValidate_UnsupportedVersion(t *testing.T) {
+	rf := &RuleFile{
+		Version: "v2",
+		Scope:   "my-scope",
+		Rules:   []Rule{{Name: "my-rule", Action: ActionDeny}},
+	}
+	err := Validate(rf)
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for unsupported version")
+	}
+	if !strings.Contains(err.Error(), `unsupported rule file version "v2"`) {
+		t.Errorf("Validate() error = %q, want it to mention unsupported version", err.Error())
+	}
+}
+
+func TestValidate_SupportedVersion(t *testing.T) {
+	rf := &RuleFile{
+		Version: "v1",
+		Scope:   "my-scope",
+		Rules:   []Rule{{Name: "my-rule", Action: ActionDeny}},
+	}
+	if err := Validate(rf); err != nil {
+		t.Fatalf("Validate() = %v, want nil", err)
+	}
+}
+
 func TestValidate_DefNameHasSecrets(t *testing.T) {
 	rf := &RuleFile{
 		Scope: "test-scope",

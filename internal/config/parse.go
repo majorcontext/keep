@@ -22,6 +22,10 @@ func ParseRuleFile(data []byte) (*RuleFile, error) {
 		return nil, fmt.Errorf("parse rule file: invalid YAML: %w", err)
 	}
 
+	if rf.Version == "" {
+		rf.Version = SupportedVersion
+	}
+
 	if err := Validate(&rf); err != nil {
 		return nil, fmt.Errorf("parse rule file: %w", err)
 	}

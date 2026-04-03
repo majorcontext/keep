@@ -1,8 +1,12 @@
 // Package config parses and validates Keep rule files, profiles, and starter packs.
 package config
 
+// SupportedVersion is the only rule file version currently accepted.
+const SupportedVersion = "v1"
+
 // RuleFile is the parsed representation of a single YAML rule file.
 type RuleFile struct {
+	Version       string            `yaml:"version,omitempty"`
 	Scope         string            `yaml:"scope"`
 	Profile       string            `yaml:"profile,omitempty"`
 	Mode          Mode              `yaml:"mode,omitempty"`

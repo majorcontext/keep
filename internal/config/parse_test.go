@@ -71,6 +71,59 @@ rules:
 	}
 }
 
+func TestParseRuleFile_VersionV1(t *testing.T) {
+	data := []byte(`
+version: v1
+scope: test-scope
+rules:
+  - name: block-deletes
+    action: deny
+`)
+	rf, err := ParseRuleFile(data)
+	if err != nil {
+		t.Fatalf("ParseRuleFile() error: %v", err)
+	}
+	if rf.Version != "v1" {
+		t.Errorf("Version = %q, want v1", rf.Version)
+	}
+}
+
+func TestParseRuleFile_NoVersionDefaultsToV1(t *testing.T) {
+	data := []byte(`
+scope: test-scope
+rules:
+  - name: block-deletes
+    action: deny
+`)
+	rf, err := ParseRuleFile(data)
+	if err != nil {
+		t.Fatalf("ParseRuleFile() error: %v", err)
+	}
+	if rf.Version != "v1" {
+		t.Errorf("Version = %q, want v1", rf.Version)
+	}
+}
+
+func TestParseRuleFile_UnsupportedVersion(t *testing.T) {
+	data := []byte(`
+version: v2
+scope: test-scope
+rules:
+  - name: block-deletes
+    action: deny
+`)
+	_, err := ParseRuleFile(data)
+	if err == nil {
+		t.Fatal("expected error for unsupported version")
+	}
+	if !strings.Contains(err.Error(), `unsupported rule file version "v2"`) {
+		t.Errorf("error = %q, want mention of unsupported version v2", err)
+	}
+	if !strings.Contains(err.Error(), "supported: v1") {
+		t.Errorf("error = %q, want mention of supported: v1", err)
+	}
+}
+
 func TestParseRuleFile_PacksRejected(t *testing.T) {
 	_, err := ParseRuleFile([]byte(`
 scope: test-scope
