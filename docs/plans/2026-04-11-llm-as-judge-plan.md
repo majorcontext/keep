@@ -327,6 +327,15 @@ default:
 	errs = append(errs, fmt.Errorf("rules[%d]: action %q is invalid (must be %q, %q, %q, or %q)", i, rule.Action, ActionDeny, ActionLog, ActionRedact, ActionJudge))
 ```
 
+Also add a lint warning in `LintAll` for orphaned `judge:` blocks on non-judge actions (mirrors the design spec requirement). If `rule.Judge != nil && rule.Action != ActionJudge`, emit a lint warning:
+
+```go
+// In LintAll or the linter function
+if rule.Judge != nil && rule.Action != ActionJudge {
+	warnings = append(warnings, fmt.Sprintf("rules[%d] %q: judge block on non-judge action %q (ignored)", i, rule.Name, rule.Action))
+}
+```
+
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `go test ./internal/config/ -v`
@@ -380,8 +389,8 @@ func TestEvaluateJudgeActionDeny(t *testing.T) {
 		},
 	}}
 
-	judgeFunc := func(ctx context.Context, model, prompt, content string) (string, string, error) {
-		return "deny", "unsafe content", nil
+	judgeFunc := func(ctx context.Context, model, prompt, content string) (JudgeResult, error) {
+		return JudgeResult{Decision: "deny", Reason: "unsafe content"}, nil
 	}
 
 	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
@@ -455,11 +464,18 @@ Add `JudgeAudit` to types:
 ```go
 // JudgeAudit records the result of a judge call.
 type JudgeAudit struct {
-	Model     string `json:"model"`
-	Verdict   string `json:"verdict"`
-	Reason    string `json:"reason"`
-	LatencyMS int64  `json:"latency_ms"`
-	Error     string `json:"error,omitempty"`
+	Model     string     `json:"model"`
+	Verdict   string     `json:"verdict"`
+	Reason    string     `json:"reason"`
+	LatencyMS int64      `json:"latency_ms"`
+	Usage     JudgeUsage `json:"usage"`
+	Error     string     `json:"error,omitempty"`
+}
+
+// JudgeUsage tracks token consumption for a judge call.
+type JudgeUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
 }
 ```
 
@@ -468,17 +484,24 @@ Add `Judge` field to `RuleResult`:
 ```go
 type RuleResult struct {
 	// ... existing fields ...
-	Judge *JudgeAudit `json:",omitempty"`
+	Judge *JudgeAudit `json:"judge,omitempty"`
 }
 ```
 
 Add judge func type and setter to `Evaluator`:
 
 ```go
-// JudgeFunc is the function signature for judge evaluation.
+// JudgeResult holds the raw result from a judge call at the engine level.
+type JudgeResult struct {
+	Decision     string
+	Reason       string
+	InputTokens  int
+	OutputTokens int
+}
+
+// JudgeHandler is the function signature for judge evaluation.
 // It receives the context, model name, prompt, and content.
-// Returns: decision ("allow" or "deny"), reason, and error.
-type JudgeFunc func(ctx context.Context, model, prompt, content string) (decision string, reason string, err error)
+type JudgeHandler func(ctx context.Context, model, prompt, content string) (JudgeResult, error)
 ```
 
 Add field to `Evaluator`:
@@ -486,10 +509,10 @@ Add field to `Evaluator`:
 ```go
 type Evaluator struct {
 	// ... existing fields ...
-	judgeFunc JudgeFunc
+	judgeFunc JudgeHandler
 }
 
-func (ev *Evaluator) SetJudgeFunc(fn JudgeFunc) {
+func (ev *Evaluator) SetJudgeFunc(fn JudgeHandler) {
 	ev.judgeFunc = fn
 }
 ```
@@ -545,10 +568,11 @@ case config.ActionJudge:
 
 	judgeCtx, cancel := context.WithTimeout(ctx, timeout)
 	start := time.Now()
-	decision, reason, judgeErr := ev.judgeFunc(judgeCtx, cr.rule.Judge.Model, cr.rule.Judge.Prompt, content)
+	jr, judgeErr := ev.judgeFunc(judgeCtx, cr.rule.Judge.Model, cr.rule.Judge.Prompt, content)
 	cancel()
 	judgeAudit.LatencyMS = time.Since(start).Milliseconds()
-	judgeAudit.Reason = reason
+	judgeAudit.Reason = jr.Reason
+	judgeAudit.Usage = JudgeUsage{InputTokens: jr.InputTokens, OutputTokens: jr.OutputTokens}
 
 	if judgeErr != nil {
 		judgeAudit.Error = judgeErr.Error()
@@ -568,18 +592,18 @@ case config.ActionJudge:
 		continue
 	}
 
-	judgeAudit.Verdict = decision
+	judgeAudit.Verdict = jr.Decision
 	rulesEvaluated[len(rulesEvaluated)-1].Judge = &judgeAudit
 
-	if decision == "deny" {
+	if jr.Decision == "deny" {
 		if !auditOnly {
 			return buildDenyResult(call, ev.scope, cr.rule.Name,
-				fmt.Sprintf("judge denied: %s", reason), rulesEvaluated, params)
+				fmt.Sprintf("judge denied: %s", jr.Reason), rulesEvaluated, params)
 		}
 		if !auditDenied {
 			auditDenied = true
 			auditDenyRule = cr.rule.Name
-			auditDenyMessage = fmt.Sprintf("judge denied: %s", reason)
+			auditDenyMessage = fmt.Sprintf("judge denied: %s", jr.Reason)
 		}
 	}
 	// decision == "allow": continue evaluating
@@ -650,20 +674,44 @@ func (e *Engine) Evaluate(ctx context.Context, call Call, scope string) (EvalRes
 }
 ```
 
-In `buildEvaluators`, after creating each evaluator, set the judge func:
+In `buildEvaluators`, after creating each evaluator, set the judge func. Extract the adapter into a helper so `Reload()` can reuse it:
 
 ```go
-if cfg.judgeFunc != nil {
-	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (string, string, error) {
-		v, err := cfg.judgeFunc(ctx, judge.Request{
+// judgeAdapter converts a keep-level JudgeFunc to an engine-level JudgeHandler.
+func judgeAdapter(fn JudgeFunc) engine.JudgeHandler {
+	return func(ctx context.Context, model, prompt, content string) (engine.JudgeResult, error) {
+		v, err := fn(ctx, judge.Request{
 			Prompt: prompt, Content: content, Model: model,
 		})
 		if err != nil {
-			return "", "", err
+			return engine.JudgeResult{}, err
 		}
-		return string(v.Decision), v.Reason, nil
-	})
+		return engine.JudgeResult{
+			Decision:     string(v.Decision),
+			Reason:       v.Reason,
+			InputTokens:  v.Usage.InputTokens,
+			OutputTokens: v.Usage.OutputTokens,
+		}, nil
+	}
 }
+```
+
+In `buildEvaluators`:
+
+```go
+if cfg.judgeFunc != nil {
+	ev.SetJudgeFunc(judgeAdapter(cfg.judgeFunc))
+}
+```
+
+**Important:** Also update `Engine.Reload()` to set the judge func on newly created evaluators. The `Reload()` method calls `buildEvaluators` — ensure the `judgeFunc` from `e.cfg` is passed through so reloaded evaluators retain judge support.
+
+Also re-export `JudgeAudit` and `JudgeUsage` types from `keep.go` so library consumers can inspect audit data:
+
+```go
+// Re-exported engine types for library consumers.
+type JudgeAudit = engine.JudgeAudit
+type JudgeUsage = engine.JudgeUsage
 ```
 
 - [ ] **Step 6: Update SafeEvaluate in helpers.go**
@@ -690,7 +738,6 @@ Update every call site to add `context.Background()` (or appropriate context) as
 - `helpers_bench_test.go` — `eng.Evaluate(ctx, call, scope)`
 - `keep_test.go` — all `eng.Evaluate(call, scope)` → `eng.Evaluate(context.Background(), call, scope)`
 - `keep_bench_test.go` — all benchmark calls
-- `fuzz_test.go` — if it calls Evaluate
 - `internal/engine/eval_test.go` — all `ev.Evaluate(call)` → `ev.Evaluate(context.Background(), call)`
 - `internal/engine/bench_test.go` — all benchmark calls
 - `internal/engine/llm_toolcall_test.go` — same pattern
@@ -737,8 +784,8 @@ func TestEvaluateJudgeActionAllow(t *testing.T) {
 		Judge:  &config.JudgeSpec{Model: "haiku", Prompt: "safe?", Timeout: "5s"},
 	}}
 	ev, _ := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
-	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (string, string, error) {
-		return "allow", "looks fine", nil
+	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (JudgeResult, error) {
+		return JudgeResult{Decision: "allow", Reason: "looks fine"}, nil
 	})
 	result := ev.Evaluate(context.Background(), Call{Operation: "test"})
 	if result.Decision != Allow {
@@ -789,8 +836,8 @@ func TestEvaluateJudgeErrorFailClosed(t *testing.T) {
 		Judge:  &config.JudgeSpec{Model: "haiku", Prompt: "safe?", OnError: "closed"},
 	}}
 	ev, _ := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
-	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (string, string, error) {
-		return "", "", fmt.Errorf("provider unavailable")
+	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (JudgeResult, error) {
+		return JudgeResult{}, fmt.Errorf("provider unavailable")
 	})
 	result := ev.Evaluate(context.Background(), Call{Operation: "test"})
 	if result.Decision != Deny {
@@ -808,8 +855,8 @@ func TestEvaluateJudgeErrorFailOpen(t *testing.T) {
 		Judge:  &config.JudgeSpec{Model: "haiku", Prompt: "safe?", OnError: "open"},
 	}}
 	ev, _ := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
-	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (string, string, error) {
-		return "", "", fmt.Errorf("provider unavailable")
+	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (JudgeResult, error) {
+		return JudgeResult{}, fmt.Errorf("provider unavailable")
 	})
 	result := ev.Evaluate(context.Background(), Call{Operation: "test"})
 	if result.Decision != Allow {
@@ -827,14 +874,14 @@ func TestEvaluateJudgeAuditTrail(t *testing.T) {
 		Judge:  &config.JudgeSpec{Model: "haiku", Prompt: "Is this safe?"},
 	}}
 	ev, _ := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
-	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (string, string, error) {
+	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (JudgeResult, error) {
 		if model != "haiku" {
 			t.Errorf("model = %q, want %q", model, "haiku")
 		}
 		if prompt != "Is this safe?" {
 			t.Errorf("prompt = %q, want %q", prompt, "Is this safe?")
 		}
-		return "allow", "all clear", nil
+		return JudgeResult{Decision: "allow", Reason: "all clear"}, nil
 	})
 	result := ev.Evaluate(context.Background(), Call{Operation: "test", Params: map[string]any{"text": "hello"}})
 
@@ -869,8 +916,8 @@ func TestEvaluateJudgeAuditOnly(t *testing.T) {
 		Judge:  &config.JudgeSpec{Model: "haiku", Prompt: "safe?"},
 	}}
 	ev, _ := NewEvaluator(celEnv, "test", config.ModeAuditOnly, config.ErrorModeClosed, rules, nil, nil, nil, false)
-	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (string, string, error) {
-		return "deny", "unsafe", nil
+	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (JudgeResult, error) {
+		return JudgeResult{Decision: "deny", Reason: "unsafe"}, nil
 	})
 	result := ev.Evaluate(context.Background(), Call{Operation: "test"})
 	// audit_only: effective decision is Allow (not enforced)
@@ -1486,31 +1533,41 @@ type FixtureVerdict struct {
 
 - [ ] **Step 3: Update test.go to inject mock judge**
 
-In the test runner, before evaluating, build a judge func from the fixture's verdicts and pass it via `WithJudge`:
+In the test runner, build a prompt→verdict lookup from the rules and fixture verdicts, then pass a judge func via `WithJudge` when constructing the engine:
 
 ```go
-// Build judge func from fixture verdicts
-if len(tc.JudgeVerdicts) > 0 {
-	verdicts := tc.JudgeVerdicts
-	judgeFunc := func(ctx context.Context, req judge.Request) (judge.Verdict, error) {
-		// Look up verdict by rule name — we need to match model+prompt to rule name
-		// The test runner knows which rules exist, so match by iterating
-		for ruleName, fv := range verdicts {
-			_ = ruleName // verdict is keyed by rule name
-			d := judge.Allow
-			if fv.Decision == "deny" {
-				d = judge.Deny
-			}
-			return judge.Verdict{Decision: d, Reason: fv.Reason}, nil
+// Build a prompt-to-verdict map from rules + fixture verdicts.
+// The fixture keys are rule names; the engine's JudgeHandler receives
+// model+prompt+content but not the rule name. To bridge this, build a
+// map from (prompt) → verdict using the rules to resolve rule name → prompt.
+func buildMockJudge(rules []config.Rule, verdicts map[string]FixtureVerdict) keep.JudgeFunc {
+	promptToVerdict := make(map[string]FixtureVerdict)
+	for _, r := range rules {
+		if r.Action != config.ActionJudge || r.Judge == nil {
+			continue
 		}
-		return judge.Verdict{Decision: judge.Allow}, nil
+		if fv, ok := verdicts[r.Name]; ok {
+			promptToVerdict[r.Judge.Prompt] = fv
+		}
 	}
-	// Rebuild engine with judge func for this test case
-	// ... or set judge func on existing engine
+
+	return func(ctx context.Context, req judge.Request) (judge.Verdict, error) {
+		fv, ok := promptToVerdict[req.Prompt]
+		if !ok {
+			return judge.Verdict{}, fmt.Errorf("no recorded verdict for prompt %q", req.Prompt)
+		}
+		d := judge.Allow
+		if fv.Decision == "deny" {
+			d = judge.Deny
+		}
+		return judge.Verdict{Decision: d, Reason: fv.Reason}, nil
+	}
 }
 ```
 
-Note: the exact wiring depends on how the test command loads engines. The implementer should read `cmd/keep/cli/test.go` to understand the engine lifecycle and find the right injection point. The key requirement: when `judge_verdicts` is present, the engine used for that test case must have a `JudgeFunc` that returns the recorded verdict for the matching rule.
+The test runner must rebuild the engine per test case when `judge_verdicts` is present, since different test cases need different verdicts. The existing engine is loaded once per fixture file — when a test case has `judge_verdicts`, load it again with `keep.WithJudge(buildMockJudge(rules, tc.JudgeVerdicts))`.
+
+If a fixture has a rule with `action: judge` but no entry in `judge_verdicts`, the mock returns an error, which triggers on_error behavior. The test should validate that users add verdicts by checking before running: if any rule has `action: judge` and the test case lacks a verdict entry for it, fail with a clear message.
 
 - [ ] **Step 4: Run tests**
 
@@ -1529,45 +1586,119 @@ git commit -m "feat(cli): add judge verdict support to test fixtures"
 ### Task 9: CLI — `keep eval` Command
 
 **Files:**
-- Create: `cmd/keep/cli/eval.go` — eval command implementation
+- Create: `cmd/keep/cli/eval.go` — eval command implementation (registers via `init()`, same as test.go/validate.go)
 - Create: `cmd/keep/cli/eval_test.go` — tests
-- Modify: `cmd/keep/main.go` — register eval command
+
+The eval command registers itself via `init()` in `cmd/keep/cli/eval.go`, same pattern as the existing test and validate commands. No changes to `cmd/keep/main.go` needed.
+
+**Dataset format** (matches design spec, includes `label` field):
+
+```go
+type EvalEntry struct {
+	Input    EvalInput `json:"input"`
+	Scope    string    `json:"scope"`
+	Expected string    `json:"expected"` // "allow" or "deny"
+	Label    string    `json:"label"`    // category label for confusion matrix
+}
+
+type EvalInput struct {
+	Operation string         `json:"operation"`
+	Params    map[string]any `json:"params"`
+}
+```
 
 - [ ] **Step 1: Write failing test**
 
 ```go
 // cmd/keep/cli/eval_test.go
-func TestEvalCommandOutput(t *testing.T) {
-	// Create a minimal dataset file
+package cli
+
+import (
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestEvalComputeMetrics(t *testing.T) {
+	// Test the metrics computation directly
+	results := []evalResult{
+		{expected: "deny", actual: "deny"},   // TP
+		{expected: "deny", actual: "deny"},   // TP
+		{expected: "allow", actual: "allow"}, // TN
+		{expected: "allow", actual: "deny"},  // FP
+		{expected: "deny", actual: "allow"},  // FN
+	}
+	m := computeMetrics(results)
+	if m.Total != 5 {
+		t.Errorf("Total = %d, want 5", m.Total)
+	}
+	if m.Correct != 3 {
+		t.Errorf("Correct = %d, want 3", m.Correct)
+	}
+	// Accuracy: 3/5 = 60%
+	if m.Accuracy < 0.59 || m.Accuracy > 0.61 {
+		t.Errorf("Accuracy = %.2f, want ~0.60", m.Accuracy)
+	}
+	// Precision: TP/(TP+FP) = 2/3
+	if m.Precision < 0.66 || m.Precision > 0.67 {
+		t.Errorf("Precision = %.2f, want ~0.67", m.Precision)
+	}
+	// Recall: TP/(TP+FN) = 2/3
+	if m.Recall < 0.66 || m.Recall > 0.67 {
+		t.Errorf("Recall = %.2f, want ~0.67", m.Recall)
+	}
+	if m.FalsePositives != 1 {
+		t.Errorf("FalsePositives = %d, want 1", m.FalsePositives)
+	}
+	if m.FalseNegatives != 1 {
+		t.Errorf("FalseNegatives = %d, want 1", m.FalseNegatives)
+	}
+}
+
+func TestEvalParseDataset(t *testing.T) {
 	dataset := `[
-		{"input": {"operation": "llm.text", "params": {"text": "bad"}}, "scope": "test", "expected": "deny"},
-		{"input": {"operation": "llm.text", "params": {"text": "good"}}, "scope": "test", "expected": "allow"}
+		{"input": {"operation": "llm.text", "params": {"text": "bad"}}, "scope": "test", "expected": "deny", "label": "harmful"},
+		{"input": {"operation": "llm.text", "params": {"text": "good"}}, "scope": "test", "expected": "allow", "label": "safe"}
 	]`
-	// Write to temp file, run eval with a mock provider
-	// Verify output contains accuracy metrics
+	tmp := filepath.Join(t.TempDir(), "dataset.json")
+	os.WriteFile(tmp, []byte(dataset), 0644)
+
+	entries, err := parseDataset(tmp)
+	if err != nil {
+		t.Fatalf("parseDataset: %v", err)
+	}
+	if len(entries) != 2 {
+		t.Fatalf("len = %d, want 2", len(entries))
+	}
+	if entries[0].Expected != "deny" {
+		t.Errorf("entries[0].Expected = %q, want %q", entries[0].Expected, "deny")
+	}
+	if entries[1].Label != "safe" {
+		t.Errorf("entries[1].Label = %q, want %q", entries[1].Label, "safe")
+	}
 }
 ```
 
-Note: this task is more involved. The implementer should:
-1. Read the existing CLI command patterns (`cmd/keep/cli/validate.go`, `cmd/keep/cli/test.go`)
-2. Implement `eval.go` following the same Cobra command pattern
-3. Parse the JSON dataset, run each example through the engine with a live provider
-4. Compute accuracy, precision, recall, and format output
+- [ ] **Step 2: Run test to verify it fails**
 
-- [ ] **Step 2: Implement eval command**
+Run: `go test ./cmd/keep/cli/ -run TestEval -v`
+Expected: FAIL — `computeMetrics`, `parseDataset` undefined
+
+- [ ] **Step 3: Implement eval command**
+
+The implementer should:
+1. Read the existing CLI command patterns (`cmd/keep/cli/validate.go`, `cmd/keep/cli/test.go`)
+2. Implement `eval.go` following the same Cobra command pattern with `init()` registration
+3. Implement `parseDataset`, `computeMetrics`, and the eval runner
+4. Support flags: `--rule`, `--provider`, `--model`, `--concurrency`, `--timeout`, `--output json`
 
 The eval command:
 - Loads rules from the specified directory
 - Parses the JSON dataset
 - Constructs a judge provider from `--provider` flag
 - For each dataset entry: builds a `Call`, evaluates with the engine, compares decision to expected
-- Computes and prints metrics
-
-- [ ] **Step 3: Register in main.go**
-
-```go
-rootCmd.AddCommand(cli.NewEvalCmd())
-```
+- Computes and prints accuracy, precision, recall, confusion matrix
 
 - [ ] **Step 4: Run tests**
 
@@ -1577,7 +1708,7 @@ Expected: ALL PASS
 - [ ] **Step 5: Commit**
 
 ```bash
-git add cmd/keep/cli/eval.go cmd/keep/cli/eval_test.go cmd/keep/main.go
+git add cmd/keep/cli/eval.go cmd/keep/cli/eval_test.go
 git commit -m "feat(cli): add keep eval command for judge quality measurement"
 ```
 
@@ -1616,13 +1747,13 @@ git commit -m "fix: address integration issues from judge implementation"
 ```
 Task 1 (judge types) ──┬── Task 5 (Anthropic provider)
                        ├── Task 6 (OpenAI provider)
-                       └── Task 2 (config) ── Task 3 (engine) ── Task 4 (engine tests)
-                                                    │
-                                                    ├── Task 7 (gateway/relay config)
-                                                    ├── Task 8 (CLI fixtures)
-                                                    └── Task 9 (keep eval)
-                                                         │
-                                                    Task 10 (integration)
+                       └── Task 3 (engine) ── Task 4 (engine tests)
+                                │                    │
+Task 2 (config) ────────────────┘                    ├── Task 7 (gateway/relay config)
+                                                     ├── Task 8 (CLI fixtures)
+                                                     └── Task 9 (keep eval)
+                                                          │
+                                                     Task 10 (integration)
 ```
 
-Tasks 1, 5, 6 can be parallelized. Tasks 2→3→4 are sequential. Tasks 7, 8, 9 can be parallelized after Task 3.
+Tasks 1 and 2 are independent and can be parallelized. Tasks 5, 6 depend only on Task 1. Task 3 depends on both Task 1 and Task 2. Tasks 7, 8, 9 can be parallelized after Task 3.
