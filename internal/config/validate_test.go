@@ -574,6 +574,100 @@ func TestValidate_SupportedVersion(t *testing.T) {
 	}
 }
 
+func TestValidateJudgeActionRequiresBlock(t *testing.T) {
+	rf := &RuleFile{
+		Scope: "test",
+		Rules: []Rule{{
+			Name:   "needs-judge",
+			Action: ActionJudge,
+			Match:  Match{Operation: "*"},
+		}},
+	}
+	err := Validate(rf)
+	if err == nil || !strings.Contains(err.Error(), "requires a judge block") {
+		t.Errorf("expected 'requires a judge block' error, got: %v", err)
+	}
+}
+
+func TestValidateJudgeRequiresPrompt(t *testing.T) {
+	rf := &RuleFile{
+		Scope: "test",
+		Rules: []Rule{{
+			Name:   "no-prompt",
+			Action: ActionJudge,
+			Match:  Match{Operation: "*"},
+			Judge:  &JudgeSpec{Model: "haiku"},
+		}},
+	}
+	err := Validate(rf)
+	if err == nil || !strings.Contains(err.Error(), "prompt is required") {
+		t.Errorf("expected 'prompt is required' error, got: %v", err)
+	}
+}
+
+func TestValidateJudgeRequiresModel(t *testing.T) {
+	rf := &RuleFile{
+		Scope: "test",
+		Rules: []Rule{{
+			Name:   "no-model",
+			Action: ActionJudge,
+			Match:  Match{Operation: "*"},
+			Judge:  &JudgeSpec{Prompt: "Is this safe?"},
+		}},
+	}
+	err := Validate(rf)
+	if err == nil || !strings.Contains(err.Error(), "model is required") {
+		t.Errorf("expected 'model is required' error, got: %v", err)
+	}
+}
+
+func TestValidateJudgeInvalidTimeout(t *testing.T) {
+	rf := &RuleFile{
+		Scope: "test",
+		Rules: []Rule{{
+			Name:   "bad-timeout",
+			Action: ActionJudge,
+			Match:  Match{Operation: "*"},
+			Judge:  &JudgeSpec{Model: "haiku", Prompt: "safe?", Timeout: "banana"},
+		}},
+	}
+	err := Validate(rf)
+	if err == nil || !strings.Contains(err.Error(), "invalid timeout") {
+		t.Errorf("expected 'invalid timeout' error, got: %v", err)
+	}
+}
+
+func TestValidateJudgeInvalidOnError(t *testing.T) {
+	rf := &RuleFile{
+		Scope: "test",
+		Rules: []Rule{{
+			Name:   "bad-onerror",
+			Action: ActionJudge,
+			Match:  Match{Operation: "*"},
+			Judge:  &JudgeSpec{Model: "haiku", Prompt: "safe?", OnError: "maybe"},
+		}},
+	}
+	err := Validate(rf)
+	if err == nil || !strings.Contains(err.Error(), "on_error") {
+		t.Errorf("expected on_error validation error, got: %v", err)
+	}
+}
+
+func TestValidateJudgeValid(t *testing.T) {
+	rf := &RuleFile{
+		Scope: "test",
+		Rules: []Rule{{
+			Name:   "good-judge",
+			Action: ActionJudge,
+			Match:  Match{Operation: "*"},
+			Judge:  &JudgeSpec{Model: "haiku", Prompt: "Is this safe?", Timeout: "5s", OnError: "closed"},
+		}},
+	}
+	if err := Validate(rf); err != nil {
+		t.Errorf("expected valid, got: %v", err)
+	}
+}
+
 func TestValidate_DefNameHasSecrets(t *testing.T) {
 	rf := &RuleFile{
 		Scope: "test-scope",

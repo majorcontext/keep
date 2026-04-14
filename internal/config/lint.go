@@ -37,6 +37,13 @@ func Lint(rf *RuleFile) []LintWarning {
 
 	var warnings []LintWarning
 	for _, rule := range rf.Rules {
+		if rule.Judge != nil && rule.Action != ActionJudge {
+			warnings = append(warnings, LintWarning{
+				Scope:   rf.Scope,
+				Rule:    rule.Name,
+				Message: "rule has a judge block but action is not \"judge\"; the judge block will be ignored",
+			})
+		}
 		if rule.Match.When == "" {
 			continue
 		}

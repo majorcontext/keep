@@ -41,6 +41,7 @@ type Rule struct {
 	Action      Action      `yaml:"action"`
 	Message     string      `yaml:"message,omitempty"`
 	Redact      *RedactSpec `yaml:"redact,omitempty"`
+	Judge       *JudgeSpec  `yaml:"judge,omitempty"`
 }
 
 // Match determines when a rule applies.
@@ -56,7 +57,16 @@ const (
 	ActionDeny   Action = "deny"
 	ActionLog    Action = "log"
 	ActionRedact Action = "redact"
+	ActionJudge  Action = "judge"
 )
+
+// JudgeSpec configures an LLM-as-judge evaluation for a rule.
+type JudgeSpec struct {
+	Model   string `yaml:"model"`
+	Prompt  string `yaml:"prompt"`
+	Timeout string `yaml:"timeout,omitempty"`
+	OnError string `yaml:"on_error,omitempty"`
+}
 
 // RedactSpec defines what to redact and how.
 type RedactSpec struct {

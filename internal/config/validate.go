@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"time"
 )
 
 var nameRe = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
@@ -94,12 +95,12 @@ func validateRule(i int, rule Rule) []error {
 
 	// 7. each rule has a valid action
 	switch rule.Action {
-	case ActionDeny, ActionLog, ActionRedact:
+	case ActionDeny, ActionLog, ActionRedact, ActionJudge:
 		// valid
 	case "":
 		errs = append(errs, fmt.Errorf("rules[%d]: action is required", i))
 	default:
-		errs = append(errs, fmt.Errorf("rules[%d]: action %q is invalid (must be %q, %q, or %q)", i, rule.Action, ActionDeny, ActionLog, ActionRedact))
+		errs = append(errs, fmt.Errorf("rules[%d]: action %q is invalid (must be %q, %q, %q, or %q)", i, rule.Action, ActionDeny, ActionLog, ActionRedact, ActionJudge))
 	}
 
 	// 8. if action is redact, redact block must be present and valid
@@ -107,6 +108,13 @@ func validateRule(i int, rule Rule) []error {
 		errs = append(errs, fmt.Errorf("rules[%d]: action %q requires a redact block", i, ActionRedact))
 	} else if rule.Action == ActionRedact && rule.Redact != nil {
 		errs = append(errs, validateRedact(i, rule.Redact)...)
+	}
+
+	// judge block validation (mirrors redact pattern)
+	if rule.Action == ActionJudge && rule.Judge == nil {
+		errs = append(errs, fmt.Errorf("rules[%d]: action %q requires a judge block", i, ActionJudge))
+	} else if rule.Action == ActionJudge && rule.Judge != nil {
+		errs = append(errs, validateJudge(i, rule.Judge)...)
 	}
 
 	// 11. when expression if set must be <= 2048 chars
@@ -176,5 +184,24 @@ func validateRedact(i int, spec *RedactSpec) []error {
 		}
 	}
 
+	return errs
+}
+
+func validateJudge(i int, spec *JudgeSpec) []error {
+	var errs []error
+	if spec.Model == "" {
+		errs = append(errs, fmt.Errorf("rules[%d]: judge model is required", i))
+	}
+	if spec.Prompt == "" {
+		errs = append(errs, fmt.Errorf("rules[%d]: judge prompt is required", i))
+	}
+	if spec.Timeout != "" {
+		if _, err := time.ParseDuration(spec.Timeout); err != nil {
+			errs = append(errs, fmt.Errorf("rules[%d]: judge invalid timeout %q: %w", i, spec.Timeout, err))
+		}
+	}
+	if spec.OnError != "" && spec.OnError != string(ErrorModeClosed) && spec.OnError != string(ErrorModeOpen) {
+		errs = append(errs, fmt.Errorf("rules[%d]: judge on_error %q is invalid (must be %q or %q)", i, spec.OnError, ErrorModeClosed, ErrorModeOpen))
+	}
 	return errs
 }
