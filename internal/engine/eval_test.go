@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -941,5 +942,178 @@ func TestEvaluateJudgeActionDeny(t *testing.T) {
 	}
 	if result.Rule != "safety-check" {
 		t.Errorf("Rule = %q, want %q", result.Rule, "safety-check")
+	}
+}
+
+func TestEvaluateJudgeActionAllow(t *testing.T) {
+	// Judge returns allow → evaluation continues, decision is Allow.
+	celEnv, _ := keepcel.NewEnv()
+	rules := []config.Rule{{
+		Name:   "safety-check",
+		Match:  config.Match{Operation: "*"},
+		Action: config.ActionJudge,
+		Judge:  &config.JudgeSpec{Model: "haiku", Prompt: "safe?", Timeout: "5s"},
+	}}
+	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("NewEvaluator: %v", err)
+	}
+	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (JudgeResult, error) {
+		return JudgeResult{Decision: "allow", Reason: "looks fine"}, nil
+	})
+	result := ev.Evaluate(context.Background(), Call{Operation: "test"})
+	if result.Decision != Allow {
+		t.Errorf("Decision = %q, want %q", result.Decision, Allow)
+	}
+}
+
+func TestEvaluateJudgeNoProvider(t *testing.T) {
+	// No judgeFunc set, on_error:closed → deny.
+	celEnv, _ := keepcel.NewEnv()
+	rules := []config.Rule{{
+		Name:   "safety-check",
+		Match:  config.Match{Operation: "*"},
+		Action: config.ActionJudge,
+		Judge:  &config.JudgeSpec{Model: "haiku", Prompt: "safe?", OnError: "closed"},
+	}}
+	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("NewEvaluator: %v", err)
+	}
+	result := ev.Evaluate(context.Background(), Call{Operation: "test"})
+	if result.Decision != Deny {
+		t.Errorf("Decision = %q, want %q", result.Decision, Deny)
+	}
+}
+
+func TestEvaluateJudgeNoProviderFailOpen(t *testing.T) {
+	// No judgeFunc set, on_error:open → allow.
+	celEnv, _ := keepcel.NewEnv()
+	rules := []config.Rule{{
+		Name:   "safety-check",
+		Match:  config.Match{Operation: "*"},
+		Action: config.ActionJudge,
+		Judge:  &config.JudgeSpec{Model: "haiku", Prompt: "safe?", OnError: "open"},
+	}}
+	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("NewEvaluator: %v", err)
+	}
+	result := ev.Evaluate(context.Background(), Call{Operation: "test"})
+	if result.Decision != Allow {
+		t.Errorf("Decision = %q, want %q", result.Decision, Allow)
+	}
+}
+
+func TestEvaluateJudgeErrorFailClosed(t *testing.T) {
+	// Judge returns error, on_error:closed → deny.
+	celEnv, _ := keepcel.NewEnv()
+	rules := []config.Rule{{
+		Name:   "safety-check",
+		Match:  config.Match{Operation: "*"},
+		Action: config.ActionJudge,
+		Judge:  &config.JudgeSpec{Model: "haiku", Prompt: "safe?", OnError: "closed"},
+	}}
+	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("NewEvaluator: %v", err)
+	}
+	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (JudgeResult, error) {
+		return JudgeResult{}, fmt.Errorf("provider unavailable")
+	})
+	result := ev.Evaluate(context.Background(), Call{Operation: "test"})
+	if result.Decision != Deny {
+		t.Errorf("Decision = %q, want %q", result.Decision, Deny)
+	}
+}
+
+func TestEvaluateJudgeErrorFailOpen(t *testing.T) {
+	// Judge returns error, on_error:open → allow.
+	celEnv, _ := keepcel.NewEnv()
+	rules := []config.Rule{{
+		Name:   "safety-check",
+		Match:  config.Match{Operation: "*"},
+		Action: config.ActionJudge,
+		Judge:  &config.JudgeSpec{Model: "haiku", Prompt: "safe?", OnError: "open"},
+	}}
+	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("NewEvaluator: %v", err)
+	}
+	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (JudgeResult, error) {
+		return JudgeResult{}, fmt.Errorf("provider unavailable")
+	})
+	result := ev.Evaluate(context.Background(), Call{Operation: "test"})
+	if result.Decision != Allow {
+		t.Errorf("Decision = %q, want %q", result.Decision, Allow)
+	}
+}
+
+func TestEvaluateJudgeAuditTrail(t *testing.T) {
+	// Verify judge audit data is populated correctly.
+	celEnv, _ := keepcel.NewEnv()
+	rules := []config.Rule{{
+		Name:   "safety-check",
+		Match:  config.Match{Operation: "*"},
+		Action: config.ActionJudge,
+		Judge:  &config.JudgeSpec{Model: "haiku", Prompt: "Is this safe?"},
+	}}
+	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("NewEvaluator: %v", err)
+	}
+	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (JudgeResult, error) {
+		if model != "haiku" {
+			t.Errorf("model = %q, want %q", model, "haiku")
+		}
+		if prompt != "Is this safe?" {
+			t.Errorf("prompt = %q, want %q", prompt, "Is this safe?")
+		}
+		return JudgeResult{Decision: "allow", Reason: "all clear"}, nil
+	})
+	result := ev.Evaluate(context.Background(), Call{Operation: "test", Params: map[string]any{"text": "hello"}})
+
+	var found bool
+	for _, rr := range result.Audit.RulesEvaluated {
+		if rr.Name == "safety-check" && rr.Judge != nil {
+			found = true
+			if rr.Judge.Model != "haiku" {
+				t.Errorf("Judge.Model = %q, want %q", rr.Judge.Model, "haiku")
+			}
+			if rr.Judge.Verdict != "allow" {
+				t.Errorf("Judge.Verdict = %q, want %q", rr.Judge.Verdict, "allow")
+			}
+			if rr.Judge.Reason != "all clear" {
+				t.Errorf("Judge.Reason = %q, want %q", rr.Judge.Reason, "all clear")
+			}
+		}
+	}
+	if !found {
+		t.Error("expected judge audit data in RulesEvaluated")
+	}
+}
+
+func TestEvaluateJudgeAuditOnly(t *testing.T) {
+	// In audit_only mode, judge deny is recorded but not enforced.
+	celEnv, _ := keepcel.NewEnv()
+	rules := []config.Rule{{
+		Name:   "safety-check",
+		Match:  config.Match{Operation: "*"},
+		Action: config.ActionJudge,
+		Judge:  &config.JudgeSpec{Model: "haiku", Prompt: "safe?"},
+	}}
+	ev, err := NewEvaluator(celEnv, "test", config.ModeAuditOnly, config.ErrorModeClosed, rules, nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("NewEvaluator: %v", err)
+	}
+	ev.SetJudgeFunc(func(ctx context.Context, model, prompt, content string) (JudgeResult, error) {
+		return JudgeResult{Decision: "deny", Reason: "unsafe"}, nil
+	})
+	result := ev.Evaluate(context.Background(), Call{Operation: "test"})
+	if result.Decision != Allow {
+		t.Errorf("Decision = %q, want %q (audit_only)", result.Decision, Allow)
+	}
+	if result.Audit.Decision != Deny {
+		t.Errorf("Audit.Decision = %q, want %q", result.Audit.Decision, Deny)
 	}
 }
