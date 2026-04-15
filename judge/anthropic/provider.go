@@ -79,7 +79,7 @@ func (p *Provider) Judge(ctx context.Context, req judge.Request) (judge.Verdict,
 	}
 	defer func() { _ = resp.Body.Close() }()
 
-	respBody, err := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20)) // 1 MB limit
 	if err != nil {
 		return judge.Verdict{}, fmt.Errorf("read response: %w", err)
 	}
@@ -118,9 +118,14 @@ func parseResponse(body []byte) (judge.Verdict, error) {
 		return judge.Verdict{}, fmt.Errorf("parse verdict JSON: %w", err)
 	}
 
-	d := judge.Allow
-	if verdict.Decision == "deny" {
+	var d judge.Decision
+	switch verdict.Decision {
+	case "allow":
+		d = judge.Allow
+	case "deny":
 		d = judge.Deny
+	default:
+		return judge.Verdict{}, fmt.Errorf("unknown verdict decision %q (expected \"allow\" or \"deny\")", verdict.Decision)
 	}
 
 	return judge.Verdict{
