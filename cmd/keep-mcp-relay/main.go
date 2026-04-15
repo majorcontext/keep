@@ -16,6 +16,8 @@ import (
 	"github.com/majorcontext/keep/internal/relay"
 	relayconfig "github.com/majorcontext/keep/internal/relay/config"
 	"github.com/majorcontext/keep/internal/relay/mcp"
+	anthropicjudge "github.com/majorcontext/keep/judge/anthropic"
+	openaijudge "github.com/majorcontext/keep/judge/openai"
 )
 
 func main() {
@@ -41,6 +43,27 @@ func main() {
 	}
 	if cfg.PacksDir != "" {
 		engineOpts = append(engineOpts, keep.WithPacksDir(cfg.PacksDir))
+	}
+	if cfg.Judge != nil {
+		apiKey := os.Getenv(cfg.Judge.APIKeyEnv)
+		if apiKey != "" {
+			switch cfg.Judge.Provider {
+			case "anthropic":
+				var jopts []anthropicjudge.Option
+				if cfg.Judge.BaseURL != "" {
+					jopts = append(jopts, anthropicjudge.WithBaseURL(cfg.Judge.BaseURL))
+				}
+				p := anthropicjudge.New(apiKey, jopts...)
+				engineOpts = append(engineOpts, keep.WithJudge(p.Judge))
+			case "openai":
+				var jopts []openaijudge.Option
+				if cfg.Judge.BaseURL != "" {
+					jopts = append(jopts, openaijudge.WithBaseURL(cfg.Judge.BaseURL))
+				}
+				p := openaijudge.New(apiKey, jopts...)
+				engineOpts = append(engineOpts, keep.WithJudge(p.Judge))
+			}
+		}
 	}
 	engine, err := keep.Load(cfg.RulesDir, engineOpts...)
 	if err != nil {

@@ -267,6 +267,79 @@ routes:
 	}
 }
 
+func TestParseJudgeConfig(t *testing.T) {
+	y := `
+listen: ":8090"
+rules_dir: "./rules"
+routes:
+  - scope: test
+    upstream: "https://example.com"
+judge:
+  provider: anthropic
+  api_key_env: ANTHROPIC_API_KEY
+`
+	path := writeTempYAML(t, y)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Judge == nil {
+		t.Fatal("expected judge config, got nil")
+	}
+	if cfg.Judge.Provider != "anthropic" {
+		t.Errorf("judge.provider: got %q, want %q", cfg.Judge.Provider, "anthropic")
+	}
+	if cfg.Judge.APIKeyEnv != "ANTHROPIC_API_KEY" {
+		t.Errorf("judge.api_key_env: got %q, want %q", cfg.Judge.APIKeyEnv, "ANTHROPIC_API_KEY")
+	}
+}
+
+func TestParseJudgeConfig_WithBaseURL(t *testing.T) {
+	y := `
+listen: ":8090"
+rules_dir: "./rules"
+routes:
+  - scope: test
+    upstream: "https://example.com"
+judge:
+  provider: openai
+  api_key_env: OPENAI_API_KEY
+  base_url: "https://custom.openai.com"
+`
+	path := writeTempYAML(t, y)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Judge == nil {
+		t.Fatal("expected judge config, got nil")
+	}
+	if cfg.Judge.Provider != "openai" {
+		t.Errorf("judge.provider: got %q, want %q", cfg.Judge.Provider, "openai")
+	}
+	if cfg.Judge.BaseURL != "https://custom.openai.com" {
+		t.Errorf("judge.base_url: got %q, want %q", cfg.Judge.BaseURL, "https://custom.openai.com")
+	}
+}
+
+func TestParseJudgeConfig_Absent(t *testing.T) {
+	y := `
+listen: ":8090"
+rules_dir: "./rules"
+routes:
+  - scope: test
+    upstream: "https://example.com"
+`
+	path := writeTempYAML(t, y)
+	cfg, err := Load(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Judge != nil {
+		t.Errorf("expected nil judge config, got %+v", cfg.Judge)
+	}
+}
+
 // writeTempYAML writes content to a temp file and returns its path.
 func writeTempYAML(t *testing.T, content string) string {
 	t.Helper()

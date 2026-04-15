@@ -9,6 +9,13 @@ import (
 	keepconfig "github.com/majorcontext/keep/internal/config"
 )
 
+// JudgeConfig holds configuration for the LLM-as-judge provider.
+type JudgeConfig struct {
+	Provider  string `yaml:"provider"`
+	APIKeyEnv string `yaml:"api_key_env"`
+	BaseURL   string `yaml:"base_url,omitempty"`
+}
+
 // RelayConfig holds the top-level relay configuration.
 type RelayConfig struct {
 	Listen      string               `yaml:"listen"`
@@ -16,6 +23,7 @@ type RelayConfig struct {
 	ProfilesDir string               `yaml:"profiles_dir,omitempty"`
 	PacksDir    string               `yaml:"packs_dir,omitempty"`
 	Routes      []Route              `yaml:"routes"`
+	Judge       *JudgeConfig         `yaml:"judge,omitempty"`
 	Log         keepconfig.LogConfig `yaml:"log,omitempty"`
 }
 

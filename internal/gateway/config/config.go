@@ -10,6 +10,13 @@ import (
 	"github.com/majorcontext/keep/llm"
 )
 
+// JudgeConfig holds configuration for the LLM-as-judge provider.
+type JudgeConfig struct {
+	Provider  string `yaml:"provider"`
+	APIKeyEnv string `yaml:"api_key_env"`
+	BaseURL   string `yaml:"base_url,omitempty"`
+}
+
 // GatewayConfig holds the top-level gateway configuration.
 type GatewayConfig struct {
 	Listen      string               `yaml:"listen"`
@@ -20,6 +27,7 @@ type GatewayConfig struct {
 	Upstream    string               `yaml:"upstream"`
 	Scope       string               `yaml:"scope"`
 	Decompose   DecomposeConfig      `yaml:"decompose,omitempty"`
+	Judge       *JudgeConfig         `yaml:"judge,omitempty"`
 	Log         keepconfig.LogConfig `yaml:"log,omitempty"`
 }
 
