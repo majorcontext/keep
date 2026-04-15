@@ -163,3 +163,22 @@ tests:
 		t.Errorf("expected '1 passed' in output, got: %s", out)
 	}
 }
+
+func TestTestCmd_JudgeVerdicts(t *testing.T) {
+	out, err := executeTest(t,
+		"testdata/valid-rules",
+		"--fixtures", "testdata/fixtures/judge-tests.yaml",
+	)
+	if err != nil {
+		t.Fatalf("expected no error, got: %v\noutput: %s", err, out)
+	}
+	if !strings.Contains(out, "2 tests") {
+		t.Errorf("expected '2 tests' in output, got: %s", out)
+	}
+	if !strings.Contains(out, "2 passed") {
+		t.Errorf("expected '2 passed' in output, got: %s", out)
+	}
+	if !strings.Contains(out, "0 failed") {
+		t.Errorf("expected '0 failed' in output, got: %s", out)
+	}
+}

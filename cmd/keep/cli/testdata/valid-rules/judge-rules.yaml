@@ -1,0 +1,10 @@
+scope: judge-test
+mode: enforce
+rules:
+  - name: safety-check
+    match:
+      operation: "llm.text"
+    action: judge
+    judge:
+      model: haiku
+      prompt: "Is this content safe?"

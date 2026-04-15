@@ -17,9 +17,16 @@ type FixtureFile struct {
 
 // TestCase is a single test: a call and the expected result.
 type TestCase struct {
-	Name   string      `yaml:"name"`
-	Call   FixtureCall `yaml:"call"`
-	Expect Expectation `yaml:"expect"`
+	Name          string                    `yaml:"name"`
+	Call          FixtureCall               `yaml:"call"`
+	Expect        Expectation               `yaml:"expect"`
+	JudgeVerdicts map[string]FixtureVerdict `yaml:"judge_verdicts,omitempty"`
+}
+
+// FixtureVerdict is a recorded judge verdict for deterministic testing.
+type FixtureVerdict struct {
+	Decision string `yaml:"decision"`
+	Reason   string `yaml:"reason"`
 }
 
 // FixtureCall is the call to evaluate.

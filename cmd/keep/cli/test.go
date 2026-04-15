@@ -8,6 +8,8 @@ import (
 	"time"
 
 	"github.com/majorcontext/keep"
+	"github.com/majorcontext/keep/internal/config"
+	"github.com/majorcontext/keep/judge"
 	"github.com/spf13/cobra"
 )
 
@@ -65,6 +67,30 @@ func runTest(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	// Check if any test case uses judge_verdicts. If so, load the config
+	// to get rules for building the prompt→verdict map.
+	var allRules map[string][]config.Rule
+	needsJudge := false
+	for _, ff := range fixtures {
+		for _, tc := range ff.Tests {
+			if len(tc.JudgeVerdicts) > 0 {
+				needsJudge = true
+				break
+			}
+		}
+		if needsJudge {
+			break
+		}
+	}
+	if needsJudge {
+		lr, loadErr := config.LoadAll(rulesDir, profilesDir, packsDir)
+		if loadErr != nil {
+			_, _ = fmt.Fprintln(cmd.ErrOrStderr(), "Error loading rules for judge verdicts:", loadErr)
+			return loadErr
+		}
+		allRules = lr.ResolvedRules
+	}
+
 	total := 0
 	passed := 0
 	failed := 0
@@ -119,7 +145,31 @@ func runTest(cmd *cobra.Command, args []string) error {
 				Context:   ctx,
 			}
 
-			result, evalErr := eng.Evaluate(context.Background(), call, ctx.Scope)
+			// When judge_verdicts are present, build a per-test engine
+			// with a mock judge that returns the recorded verdicts.
+			evalEng := eng
+			if len(tc.JudgeVerdicts) > 0 {
+				scopeRules := allRules[ctx.Scope]
+				if scopeRules == nil {
+					failed++
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  FAIL  %s\n        no rules found for scope %q\n", tc.Name, ctx.Scope)
+					continue
+				}
+				mockJudge := buildMockJudge(scopeRules, tc.JudgeVerdicts)
+				judgeOpts := make([]keep.Option, len(opts), len(opts)+1)
+				copy(judgeOpts, opts)
+				judgeOpts = append(judgeOpts, keep.WithJudge(mockJudge))
+				judgeEng, judgeErr := keep.Load(rulesDir, judgeOpts...)
+				if judgeErr != nil {
+					failed++
+					_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  FAIL  %s\n        error building judge engine: %v\n", tc.Name, judgeErr)
+					continue
+				}
+				defer judgeEng.Close()
+				evalEng = judgeEng
+			}
+
+			result, evalErr := evalEng.Evaluate(context.Background(), call, ctx.Scope)
 			if evalErr != nil {
 				failed++
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  FAIL  %s\n        error: %v\n", tc.Name, evalErr)
@@ -188,4 +238,30 @@ func runTest(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("%d test(s) failed", failed)
 	}
 	return nil
+}
+
+// buildMockJudge creates a JudgeFunc that returns recorded verdicts by
+// cross-referencing rule names to judge prompts.
+func buildMockJudge(rules []config.Rule, verdicts map[string]FixtureVerdict) keep.JudgeFunc {
+	promptToVerdict := make(map[string]FixtureVerdict)
+	for _, r := range rules {
+		if r.Action != config.ActionJudge || r.Judge == nil {
+			continue
+		}
+		if fv, ok := verdicts[r.Name]; ok {
+			promptToVerdict[r.Judge.Prompt] = fv
+		}
+	}
+
+	return func(ctx context.Context, req judge.Request) (judge.Verdict, error) {
+		fv, ok := promptToVerdict[req.Prompt]
+		if !ok {
+			return judge.Verdict{}, fmt.Errorf("no recorded verdict for prompt %q", req.Prompt)
+		}
+		d := judge.Allow
+		if fv.Decision == "deny" {
+			d = judge.Deny
+		}
+		return judge.Verdict{Decision: d, Reason: fv.Reason}, nil
+	}
 }
