@@ -1,6 +1,7 @@
 package llm_test
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -38,7 +39,7 @@ rules:
 		"stop_reason": "tool_use",
 	})
 
-	result, err := llm.EvaluateResponse(engine, codec, respBody, "gateway", llm.DecomposeConfig{})
+	result, err := llm.EvaluateResponse(context.Background(), engine, codec, respBody, "gateway", llm.DecomposeConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -75,7 +76,7 @@ rules:
 		},
 	})
 
-	result, err := llm.EvaluateRequest(engine, codec, reqBody, "gateway", llm.DecomposeConfig{})
+	result, err := llm.EvaluateRequest(context.Background(), engine, codec, reqBody, "gateway", llm.DecomposeConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +147,7 @@ rules:
 		{Type: "message_stop", Data: string(msgStop)},
 	}
 
-	result, err := llm.EvaluateStream(engine, codec, events, "gateway", llm.DecomposeConfig{})
+	result, err := llm.EvaluateStream(context.Background(), engine, codec, events, "gateway", llm.DecomposeConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

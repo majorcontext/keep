@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -149,7 +150,7 @@ func (p *Proxy) handleMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// 2. Evaluate request policy.
-	evalResult, err := p.evaluateRequestPolicy(w, body)
+	evalResult, err := p.evaluateRequestPolicy(r.Context(), w, body)
 	if err != nil {
 		return // error (or deny) already written to w
 	}
@@ -218,8 +219,8 @@ type requestPolicyResult struct {
 // evaluateRequestPolicy decomposes the request, evaluates each call against policy,
 // and reassembles the request body if any redactions were applied.
 // On deny or error, it writes the appropriate response to w and returns a non-nil error.
-func (p *Proxy) evaluateRequestPolicy(w http.ResponseWriter, body []byte) (*requestPolicyResult, error) {
-	result, err := llm.EvaluateRequest(p.engine, p.codec, body, p.scope, p.llmCfg)
+func (p *Proxy) evaluateRequestPolicy(ctx context.Context, w http.ResponseWriter, body []byte) (*requestPolicyResult, error) {
+	result, err := llm.EvaluateRequest(ctx, p.engine, p.codec, body, p.scope, p.llmCfg)
 	if err != nil {
 		writeInternalError(w, "policy evaluation error")
 		return nil, err
@@ -294,7 +295,7 @@ func (p *Proxy) handleNonStreamingResponse(w http.ResponseWriter, r *http.Reques
 	}
 
 	// Evaluate response policy via pipeline.
-	result, err := llm.EvaluateResponse(p.engine, p.codec, respBody, p.scope, p.llmCfg)
+	result, err := llm.EvaluateResponse(r.Context(), p.engine, p.codec, respBody, p.scope, p.llmCfg)
 	if err != nil {
 		writeInternalError(w, "response policy evaluation error")
 		return
@@ -389,7 +390,7 @@ func (p *Proxy) handleStreamingResponse(w http.ResponseWriter, r *http.Request, 
 	p.logDebug("upstream stream", "status", upstreamResp.StatusCode, "events", len(events))
 
 	// 4. Evaluate stream via pipeline (reassemble, decompose, evaluate, reassemble/synthesize).
-	streamResult, err := llm.EvaluateStream(p.engine, p.codec, events, p.scope, p.llmCfg)
+	streamResult, err := llm.EvaluateStream(r.Context(), p.engine, p.codec, events, p.scope, p.llmCfg)
 	if err != nil {
 		writeInternalError(w, "stream policy evaluation error")
 		return

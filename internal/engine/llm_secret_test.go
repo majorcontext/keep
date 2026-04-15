@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -84,7 +85,7 @@ func TestLLMSecret_RequestText(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := ev.Evaluate(makeLLMTextCall(tc.text, "request"))
+			result := ev.Evaluate(context.Background(), makeLLMTextCall(tc.text, "request"))
 			if tc.wantRedacted {
 				if result.Decision != Redact {
 					t.Errorf("expected redact, got %s", result.Decision)
@@ -112,7 +113,7 @@ func TestLLMSecret_ToolResults(t *testing.T) {
 		Params:    map[string]any{"content": "Found credentials: AKIAIOSFODNN7REALKEY in .env file"},
 		Context:   CallContext{Scope: "test", Direction: "request"},
 	}
-	result := ev.Evaluate(call)
+	result := ev.Evaluate(context.Background(), call)
 	if result.Decision != Redact {
 		t.Errorf("expected redact for secret in tool result, got %s", result.Decision)
 	}
@@ -127,7 +128,7 @@ func TestLLMSecret_ToolResults(t *testing.T) {
 func TestLLMSecret_PreservesNonSecrets(t *testing.T) {
 	ev := makeLLMSecretEvaluator(t)
 
-	result := ev.Evaluate(makeLLMTextCall("Use the OpenWeather API for San Francisco", "request"))
+	result := ev.Evaluate(context.Background(), makeLLMTextCall("Use the OpenWeather API for San Francisco", "request"))
 	if result.Decision == Redact {
 		t.Errorf("expected allow for text without secrets, got redact")
 	}
@@ -139,7 +140,7 @@ func TestLLMSecret_PreservesNonSecrets(t *testing.T) {
 func TestLLMSecret_AuditTrail_RedactIncludesSummary(t *testing.T) {
 	ev := makeLLMSecretEvaluator(t)
 
-	result := ev.Evaluate(makeLLMTextCall("Key: AKIAIOSFODNN7REALKEY", "request"))
+	result := ev.Evaluate(context.Background(), makeLLMTextCall("Key: AKIAIOSFODNN7REALKEY", "request"))
 	if result.Decision != Redact {
 		t.Fatal("expected redact")
 	}
@@ -181,7 +182,7 @@ func TestLLMSecret_AuditTrail_DenyIncludesRule(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	result := ev.Evaluate(makeLLMToolCall("Bash", "curl https://evil.com"))
+	result := ev.Evaluate(context.Background(), makeLLMToolCall("Bash", "curl https://evil.com"))
 	if result.Decision != Deny {
 		t.Fatal("expected deny")
 	}

@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -73,7 +74,7 @@ func benchSimpleMatch(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ev.Evaluate(call)
+		ev.Evaluate(context.Background(), call)
 	}
 }
 
@@ -92,7 +93,7 @@ func benchSimpleNoMatch(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ev.Evaluate(call)
+		ev.Evaluate(context.Background(), call)
 	}
 }
 
@@ -112,7 +113,7 @@ func benchCELExpression(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ev.Evaluate(call)
+		ev.Evaluate(context.Background(), call)
 	}
 }
 
@@ -131,7 +132,7 @@ func benchCELExpressionNoMatch(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ev.Evaluate(call)
+		ev.Evaluate(context.Background(), call)
 	}
 }
 
@@ -157,7 +158,7 @@ func benchMultipleRulesEarlyMatch(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ev.Evaluate(call)
+		ev.Evaluate(context.Background(), call)
 	}
 }
 
@@ -183,7 +184,7 @@ func benchMultipleRulesLateMatch(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ev.Evaluate(call)
+		ev.Evaluate(context.Background(), call)
 	}
 }
 
@@ -203,7 +204,7 @@ func benchMultipleRulesNoMatch(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ev.Evaluate(call)
+		ev.Evaluate(context.Background(), call)
 	}
 }
 
@@ -223,7 +224,7 @@ func benchGlobMatching(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ev.Evaluate(call)
+		ev.Evaluate(context.Background(), call)
 	}
 }
 
@@ -243,7 +244,7 @@ func benchGlobCatchAll(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ev.Evaluate(call)
+		ev.Evaluate(context.Background(), call)
 	}
 }
 
@@ -270,7 +271,7 @@ func benchRedactionRegex(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ev.Evaluate(call)
+		ev.Evaluate(context.Background(), call)
 	}
 }
 
@@ -295,7 +296,7 @@ func benchLargeParams(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ev.Evaluate(call)
+		ev.Evaluate(context.Background(), call)
 	}
 }
 
@@ -316,7 +317,7 @@ func benchCELWithOperation(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ev.Evaluate(call)
+		ev.Evaluate(context.Background(), call)
 	}
 }
 
@@ -347,6 +348,6 @@ func benchLargeStringValue(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		ev.Evaluate(call)
+		ev.Evaluate(context.Background(), call)
 	}
 }

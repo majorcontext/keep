@@ -1,6 +1,7 @@
 package keep
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -79,7 +80,7 @@ rules:
 	defer eng.Close()
 
 	call := Call{Operation: "anything"}
-	result, err := SafeEvaluate(eng, call, "test")
+	result, err := SafeEvaluate(context.Background(), eng, call, "test")
 	if err != nil {
 		t.Fatalf("SafeEvaluate error: %v", err)
 	}
@@ -105,7 +106,7 @@ rules:
 	defer eng.Close()
 
 	call := Call{Operation: "anything"}
-	_, err = SafeEvaluate(eng, call, "nonexistent")
+	_, err = SafeEvaluate(context.Background(), eng, call, "nonexistent")
 	if err == nil {
 		t.Fatal("expected error for unknown scope")
 	}
@@ -113,7 +114,7 @@ rules:
 
 func TestSafeEvaluatePanicRecovery(t *testing.T) {
 	call := Call{Operation: "anything"}
-	result, err := SafeEvaluate(nil, call, "test")
+	result, err := SafeEvaluate(context.Background(), nil, call, "test")
 	if err == nil {
 		t.Fatal("expected error from panic recovery")
 	}

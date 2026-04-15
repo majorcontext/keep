@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"strings"
 	"testing"
 
@@ -91,7 +92,7 @@ func TestMCPToolCall_WriteQueryDenied(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := ev.Evaluate(makeMCPCall("write_query", tc.params, "request"))
+			result := ev.Evaluate(context.Background(), makeMCPCall("write_query", tc.params, "request"))
 			if result.Decision != Deny {
 				t.Errorf("expected deny, got %s for %s", result.Decision, tc.name)
 			}
@@ -105,7 +106,7 @@ func TestMCPToolCall_WriteQueryDenied(t *testing.T) {
 func TestMCPToolCall_ReadQueryAllowed(t *testing.T) {
 	ev := makeMCPReadOnlyEvaluator(t)
 
-	result := ev.Evaluate(makeMCPCall("read_query", map[string]any{
+	result := ev.Evaluate(context.Background(), makeMCPCall("read_query", map[string]any{
 		"sql": "SELECT * FROM users WHERE id = 1",
 	}, "request"))
 	if result.Decision != Allow {
@@ -119,7 +120,7 @@ func TestMCPToolCall_OtherToolsAllowed(t *testing.T) {
 	tools := []string{"list_tables", "describe_table", "create_table"}
 	for _, tool := range tools {
 		t.Run(tool, func(t *testing.T) {
-			result := ev.Evaluate(makeMCPCall(tool, nil, "request"))
+			result := ev.Evaluate(context.Background(), makeMCPCall(tool, nil, "request"))
 			if result.Decision != Allow {
 				t.Errorf("expected allow for %s, got %s", tool, result.Decision)
 			}
@@ -156,7 +157,7 @@ func TestMCPToolCall_ResponseRedaction(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			result := ev.Evaluate(makeMCPCall("read_query", map[string]any{
+			result := ev.Evaluate(context.Background(), makeMCPCall("read_query", map[string]any{
 				"content": tc.content,
 			}, "response"))
 			if result.Decision != Redact {
@@ -180,7 +181,7 @@ func TestMCPToolCall_ResponseRedaction_RequestSideIgnored(t *testing.T) {
 
 	// The redact rule has context.direction == 'response', so a request-side
 	// call with the same operation should not trigger redaction.
-	result := ev.Evaluate(makeMCPCall("read_query", map[string]any{
+	result := ev.Evaluate(context.Background(), makeMCPCall("read_query", map[string]any{
 		"content": "password: hunter2",
 	}, "request"))
 	if result.Decision == Redact {
@@ -200,7 +201,7 @@ func TestMCPToolCall_ResponseRedaction_NoPasswords(t *testing.T) {
 
 	for _, content := range clean {
 		t.Run(strings.TrimSpace(content[:min(len(content), 30)]), func(t *testing.T) {
-			result := ev.Evaluate(makeMCPCall("read_query", map[string]any{
+			result := ev.Evaluate(context.Background(), makeMCPCall("read_query", map[string]any{
 				"content": content,
 			}, "response"))
 			if result.Decision == Redact {

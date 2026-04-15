@@ -1,6 +1,7 @@
 package keep_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -100,7 +101,7 @@ func TestEvaluate_Allow(t *testing.T) {
 	}
 	defer eng.Close()
 
-	result, err := eng.Evaluate(keep.Call{
+	result, err := eng.Evaluate(context.Background(), keep.Call{
 		Operation: "create_issue",
 		Params:    map[string]any{"priority": 1, "title": "Test issue"},
 	}, "linear-tools")
@@ -119,7 +120,7 @@ func TestEvaluate_Deny(t *testing.T) {
 	}
 	defer eng.Close()
 
-	result, err := eng.Evaluate(keep.Call{
+	result, err := eng.Evaluate(context.Background(), keep.Call{
 		Operation: "delete_issue",
 		Params:    map[string]any{"issueId": "ISSUE-123"},
 	}, "linear-tools")
@@ -141,7 +142,7 @@ func TestEvaluate_DenyWhen(t *testing.T) {
 	}
 	defer eng.Close()
 
-	result, err := eng.Evaluate(keep.Call{
+	result, err := eng.Evaluate(context.Background(), keep.Call{
 		Operation: "create_issue",
 		Params:    map[string]any{"priority": 0, "title": "Outage"},
 	}, "linear-tools")
@@ -163,7 +164,7 @@ func TestEvaluate_Redact(t *testing.T) {
 	}
 	defer eng.Close()
 
-	result, err := eng.Evaluate(keep.Call{
+	result, err := eng.Evaluate(context.Background(), keep.Call{
 		Operation: "llm.tool_result",
 		Params:    map[string]any{"content": "key is AKIAIOSFODNN7EXAMPLE"},
 	}, "anthropic-gateway")
@@ -192,7 +193,7 @@ func TestEvaluate_UnknownScope(t *testing.T) {
 	}
 	defer eng.Close()
 
-	_, err = eng.Evaluate(keep.Call{
+	_, err = eng.Evaluate(context.Background(), keep.Call{
 		Operation: "anything",
 	}, "nonexistent-scope")
 	if err == nil {
@@ -235,7 +236,7 @@ func TestLoad_WithDefs(t *testing.T) {
 	}
 
 	// Allowed team => allow
-	result, err := eng.Evaluate(keep.Call{
+	result, err := eng.Evaluate(context.Background(), keep.Call{
 		Operation: "create_issue",
 		Params:    map[string]any{"team": "TEAM-ENG", "priority": int64(1)},
 	}, "test-defs")
@@ -247,7 +248,7 @@ func TestLoad_WithDefs(t *testing.T) {
 	}
 
 	// Disallowed team => deny
-	result, err = eng.Evaluate(keep.Call{
+	result, err = eng.Evaluate(context.Background(), keep.Call{
 		Operation: "create_issue",
 		Params:    map[string]any{"team": "TEAM-SALES", "priority": int64(1)},
 	}, "test-defs")
@@ -262,7 +263,7 @@ func TestLoad_WithDefs(t *testing.T) {
 	}
 
 	// Priority too high => deny
-	result, err = eng.Evaluate(keep.Call{
+	result, err = eng.Evaluate(context.Background(), keep.Call{
 		Operation: "create_issue",
 		Params:    map[string]any{"team": "TEAM-ENG", "priority": int64(5)},
 	}, "test-defs")
@@ -277,7 +278,7 @@ func TestLoad_WithDefs(t *testing.T) {
 	}
 
 	// Agent branch prefix => deny
-	result, err = eng.Evaluate(keep.Call{
+	result, err = eng.Evaluate(context.Background(), keep.Call{
 		Operation: "push",
 		Params:    map[string]any{"branch": "agent/fix-123"},
 	}, "test-defs")
@@ -289,7 +290,7 @@ func TestLoad_WithDefs(t *testing.T) {
 	}
 
 	// Non-agent branch => allow
-	result, err = eng.Evaluate(keep.Call{
+	result, err = eng.Evaluate(context.Background(), keep.Call{
 		Operation: "push",
 		Params:    map[string]any{"branch": "main"},
 	}, "test-defs")
@@ -317,7 +318,7 @@ func TestEvaluate_Concurrent(t *testing.T) {
 		go func() {
 			for i := 0; i < iterations; i++ {
 				// Alternate between scopes and operations to exercise contention.
-				result, err := eng.Evaluate(keep.Call{
+				result, err := eng.Evaluate(context.Background(), keep.Call{
 					Operation: "create_issue",
 					Params:    map[string]any{"priority": 1, "title": "Concurrent test"},
 				}, "linear-tools")
@@ -330,7 +331,7 @@ func TestEvaluate_Concurrent(t *testing.T) {
 					return
 				}
 
-				result, err = eng.Evaluate(keep.Call{
+				result, err = eng.Evaluate(context.Background(), keep.Call{
 					Operation: "delete_issue",
 					Params:    map[string]any{"issueId": "ISSUE-1"},
 				}, "linear-tools")
@@ -376,7 +377,7 @@ rules:
 	}
 	defer eng.Close()
 
-	result, err := eng.Evaluate(keep.Call{
+	result, err := eng.Evaluate(context.Background(), keep.Call{
 		Operation: "llm.text",
 		Params:    map[string]any{"text": "key is AKIAIOSFODNN7REALKEY"},
 		Context:   keep.CallContext{Timestamp: time.Now(), Scope: "test"},
@@ -435,7 +436,7 @@ rules:
 	}
 
 	// Verify the new scope works.
-	result, err := eng.Evaluate(keep.Call{
+	result, err := eng.Evaluate(context.Background(), keep.Call{
 		Operation: "anything",
 	}, "new-scope")
 	if err != nil {
@@ -463,7 +464,7 @@ rules:
 	}
 	defer eng.Close()
 
-	result, err := eng.Evaluate(keep.Call{Operation: "anything"}, "test-mode")
+	result, err := eng.Evaluate(context.Background(), keep.Call{Operation: "anything"}, "test-mode")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -492,7 +493,7 @@ rules:
 	}
 	defer eng.Close()
 
-	result, err := eng.Evaluate(keep.Call{Operation: "anything"}, "test-mode")
+	result, err := eng.Evaluate(context.Background(), keep.Call{Operation: "anything"}, "test-mode")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +528,7 @@ rules:
 	}
 	defer eng.Close()
 
-	result, _ := eng.Evaluate(keep.Call{Operation: "anything"}, "test-mode")
+	result, _ := eng.Evaluate(context.Background(), keep.Call{Operation: "anything"}, "test-mode")
 	if result.Decision != keep.Deny {
 		t.Errorf("Decision = %q, want deny (ForceEnforce)", result.Decision)
 	}
@@ -546,7 +547,7 @@ func TestWithAuditHook(t *testing.T) {
 	defer eng.Close()
 
 	// Allow path.
-	if _, err := eng.Evaluate(keep.Call{
+	if _, err := eng.Evaluate(context.Background(), keep.Call{
 		Operation: "create_issue",
 		Params:    map[string]any{"priority": 1, "title": "Test"},
 	}, "linear-tools"); err != nil {
@@ -554,7 +555,7 @@ func TestWithAuditHook(t *testing.T) {
 	}
 
 	// Deny path.
-	if _, err := eng.Evaluate(keep.Call{
+	if _, err := eng.Evaluate(context.Background(), keep.Call{
 		Operation: "delete_issue",
 		Params:    map[string]any{"issueId": "X"},
 	}, "linear-tools"); err != nil {
@@ -588,7 +589,7 @@ func TestWithAuditHook_NotCalledOnError(t *testing.T) {
 	defer eng.Close()
 
 	// Unknown scope produces an error, hook should not fire.
-	_, err = eng.Evaluate(keep.Call{Operation: "anything"}, "nonexistent")
+	_, err = eng.Evaluate(context.Background(), keep.Call{Operation: "anything"}, "nonexistent")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -619,7 +620,7 @@ rules:
 		t.Fatalf("Scopes() = %v, want [embedded]", scopes)
 	}
 
-	result, err := eng.Evaluate(keep.Call{Operation: "delete_issue"}, "embedded")
+	result, err := eng.Evaluate(context.Background(), keep.Call{Operation: "delete_issue"}, "embedded")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -627,7 +628,7 @@ rules:
 		t.Errorf("Decision = %q, want deny", result.Decision)
 	}
 
-	result, err = eng.Evaluate(keep.Call{Operation: "get_issue"}, "embedded")
+	result, err = eng.Evaluate(context.Background(), keep.Call{Operation: "get_issue"}, "embedded")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -670,7 +671,7 @@ rules:
 	}
 	defer eng.Close()
 
-	result, _ := eng.Evaluate(keep.Call{Operation: "anything"}, "embedded")
+	result, _ := eng.Evaluate(context.Background(), keep.Call{Operation: "anything"}, "embedded")
 	if result.Decision != keep.Allow {
 		t.Errorf("want allow in audit mode, got %q", result.Decision)
 	}
@@ -701,7 +702,7 @@ rules:
 	defer eng.Close()
 
 	// P0 denied.
-	result, _ := eng.Evaluate(keep.Call{
+	result, _ := eng.Evaluate(context.Background(), keep.Call{
 		Operation: "create_issue",
 		Params:    map[string]any{"priority": int64(0)},
 	}, "cel-test")
@@ -710,7 +711,7 @@ rules:
 	}
 
 	// P1 allowed.
-	result, _ = eng.Evaluate(keep.Call{
+	result, _ = eng.Evaluate(context.Background(), keep.Call{
 		Operation: "create_issue",
 		Params:    map[string]any{"priority": int64(1)},
 	}, "cel-test")
@@ -801,7 +802,7 @@ func TestRuleSet_AllowDeny(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.op, func(t *testing.T) {
-			result, err := eng.Evaluate(keep.Call{Operation: tc.op}, "test-scope")
+			result, err := eng.Evaluate(context.Background(), keep.Call{Operation: tc.op}, "test-scope")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -823,7 +824,7 @@ func TestRuleSet_DenyOnly(t *testing.T) {
 	defer eng.Close()
 
 	// Denied tool.
-	result, err := eng.Evaluate(keep.Call{Operation: "delete_issue"}, "test-scope")
+	result, err := eng.Evaluate(context.Background(), keep.Call{Operation: "delete_issue"}, "test-scope")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -832,7 +833,7 @@ func TestRuleSet_DenyOnly(t *testing.T) {
 	}
 
 	// Anything else is allowed.
-	result, err = eng.Evaluate(keep.Call{Operation: "get_issue"}, "test-scope")
+	result, err = eng.Evaluate(context.Background(), keep.Call{Operation: "get_issue"}, "test-scope")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -852,7 +853,7 @@ func TestRuleSet_AllowOnly(t *testing.T) {
 	defer eng.Close()
 
 	// Allowed tool.
-	result, err := eng.Evaluate(keep.Call{Operation: "get_issue"}, "test-scope")
+	result, err := eng.Evaluate(context.Background(), keep.Call{Operation: "get_issue"}, "test-scope")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -861,7 +862,7 @@ func TestRuleSet_AllowOnly(t *testing.T) {
 	}
 
 	// Not in allowlist.
-	result, err = eng.Evaluate(keep.Call{Operation: "delete_issue"}, "test-scope")
+	result, err = eng.Evaluate(context.Background(), keep.Call{Operation: "delete_issue"}, "test-scope")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -884,7 +885,7 @@ func TestRuleSet_WithOptions(t *testing.T) {
 	}
 	defer eng.Close()
 
-	result, err := eng.Evaluate(keep.Call{Operation: "delete_issue"}, "test-scope")
+	result, err := eng.Evaluate(context.Background(), keep.Call{Operation: "delete_issue"}, "test-scope")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -907,7 +908,7 @@ func TestRuleSet_DenyPrecedenceOverAllow(t *testing.T) {
 	}
 	defer eng.Close()
 
-	result, err := eng.Evaluate(keep.Call{Operation: "delete_issue"}, "test-scope")
+	result, err := eng.Evaluate(context.Background(), keep.Call{Operation: "delete_issue"}, "test-scope")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -925,7 +926,7 @@ func TestRuleSet_EmptyCompiles(t *testing.T) {
 	defer eng.Close()
 
 	// No rules means everything is allowed.
-	result, err := eng.Evaluate(keep.Call{Operation: "anything"}, "empty")
+	result, err := eng.Evaluate(context.Background(), keep.Call{Operation: "anything"}, "empty")
 	if err != nil {
 		t.Fatal(err)
 	}

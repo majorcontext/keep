@@ -2,6 +2,7 @@
 package keep
 
 import (
+	"context"
 	"fmt"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/majorcontext/keep/internal/rate"
 	"github.com/majorcontext/keep/internal/redact"
 	"github.com/majorcontext/keep/internal/secrets"
+	"github.com/majorcontext/keep/judge"
 )
 
 // Type aliases re-exported from internal packages.
@@ -25,6 +27,11 @@ type AuditEntry = engine.AuditEntry
 type RuleResult = engine.RuleResult
 type RedactedField = engine.RedactedField
 type Mutation = redact.Mutation
+type JudgeAudit = engine.JudgeAudit
+type JudgeUsage = engine.JudgeUsage
+
+// JudgeFunc is the function signature for judge evaluation at the keep API level.
+type JudgeFunc func(ctx context.Context, req judge.Request) (judge.Verdict, error)
 
 // Decision constants re-exported from the engine package.
 const (
@@ -48,6 +55,7 @@ type engineConfig struct {
 	packsDir     string
 	modeOverride config.Mode
 	auditHook    func(AuditEntry)
+	judgeFunc    JudgeFunc
 }
 
 // Option configures Load behavior.
@@ -71,6 +79,9 @@ func WithMode(mode string) Option {
 func WithAuditHook(hook func(AuditEntry)) Option {
 	return func(c *engineConfig) { c.auditHook = hook }
 }
+
+// WithJudge registers a judge function for LLM-as-judge evaluation.
+func WithJudge(fn JudgeFunc) Option { return func(c *engineConfig) { c.judgeFunc = fn } }
 
 // WithForceEnforce overrides every scope's mode to "enforce".
 // Deprecated: Use WithMode("enforce") instead.
@@ -136,7 +147,7 @@ func (e *Engine) Close() {
 
 // Evaluate runs all rules in the given scope against the call and returns
 // the policy decision.
-func (e *Engine) Evaluate(call Call, scope string) (EvalResult, error) {
+func (e *Engine) Evaluate(ctx context.Context, call Call, scope string) (EvalResult, error) {
 	e.mu.RLock()
 	ev, ok := e.evaluators[scope]
 	e.mu.RUnlock()
@@ -145,7 +156,7 @@ func (e *Engine) Evaluate(call Call, scope string) (EvalResult, error) {
 		return EvalResult{}, fmt.Errorf("keep: scope %q not found (available: %s)", scope, strings.Join(e.Scopes(), ", "))
 	}
 
-	result := ev.Evaluate(call)
+	result := ev.Evaluate(ctx, call)
 	if e.cfg.auditHook != nil {
 		e.cfg.auditHook(result.Audit)
 	}
@@ -390,7 +401,30 @@ func buildEvaluators(lr *config.LoadResult, celEnv *keepcel.Env, cfg engineConfi
 		if err != nil {
 			return nil, fmt.Errorf("keep: compile scope %q: %w", scopeName, err)
 		}
+		if cfg.judgeFunc != nil {
+			ev.SetJudgeFunc(judgeAdapter(cfg.judgeFunc))
+		}
 		evaluators[scopeName] = ev
 	}
 	return evaluators, nil
+}
+
+// judgeAdapter converts a keep-level JudgeFunc to an engine-level JudgeHandler.
+func judgeAdapter(fn JudgeFunc) engine.JudgeHandler {
+	return func(ctx context.Context, model, prompt, content string) (engine.JudgeResult, error) {
+		v, err := fn(ctx, judge.Request{
+			Prompt:  prompt,
+			Content: content,
+			Model:   model,
+		})
+		if err != nil {
+			return engine.JudgeResult{}, err
+		}
+		return engine.JudgeResult{
+			Decision:     string(v.Decision),
+			Reason:       v.Reason,
+			InputTokens:  v.Usage.InputTokens,
+			OutputTokens: v.Usage.OutputTokens,
+		}, nil
+	}
 }

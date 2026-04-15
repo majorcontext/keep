@@ -1,6 +1,7 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
 	"testing"
 
@@ -60,7 +61,7 @@ rules:
 		},
 	}
 
-	result, err := EvaluateRequest(engine, codec, []byte(`{}`), "test", DecomposeConfig{})
+	result, err := EvaluateRequest(context.Background(), engine, codec, []byte(`{}`), "test", DecomposeConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -94,7 +95,7 @@ rules:
 		},
 	}
 
-	result, err := EvaluateRequest(engine, codec, []byte(`{}`), "test", DecomposeConfig{})
+	result, err := EvaluateRequest(context.Background(), engine, codec, []byte(`{}`), "test", DecomposeConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,7 +132,7 @@ rules:
 		},
 	}
 
-	result, err := EvaluateResponse(engine, codec, body, "test", DecomposeConfig{})
+	result, err := EvaluateResponse(context.Background(), engine, codec, body, "test", DecomposeConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +166,7 @@ rules:
 		body:  respBody,
 	}
 
-	result, err := EvaluateStream(engine, codec, events, "test", DecomposeConfig{})
+	result, err := EvaluateStream(context.Background(), engine, codec, events, "test", DecomposeConfig{})
 	if err != nil {
 		t.Fatal(err)
 	}

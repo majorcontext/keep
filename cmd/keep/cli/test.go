@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"context"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -118,7 +119,7 @@ func runTest(cmd *cobra.Command, args []string) error {
 				Context:   ctx,
 			}
 
-			result, evalErr := eng.Evaluate(call, ctx.Scope)
+			result, evalErr := eng.Evaluate(context.Background(), call, ctx.Scope)
 			if evalErr != nil {
 				failed++
 				_, _ = fmt.Fprintf(cmd.OutOrStdout(), "  FAIL  %s\n        error: %v\n", tc.Name, evalErr)

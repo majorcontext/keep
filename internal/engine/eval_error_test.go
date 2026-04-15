@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -56,7 +57,7 @@ func TestEval_CELError_FailClosed(t *testing.T) {
 		},
 	}
 	ev := makeEvaluatorWithMode(t, config.ModeEnforce, config.ErrorModeClosed, rules)
-	result := ev.Evaluate(celErrorCall())
+	result := ev.Evaluate(context.Background(), celErrorCall())
 
 	if result.Decision != Deny {
 		t.Errorf("expected Deny (fail-closed), got %s", result.Decision)
@@ -82,7 +83,7 @@ func TestEval_CELError_FailOpen(t *testing.T) {
 		},
 	}
 	ev := makeEvaluatorWithMode(t, config.ModeEnforce, config.ErrorModeOpen, rules)
-	result := ev.Evaluate(celErrorCall())
+	result := ev.Evaluate(context.Background(), celErrorCall())
 
 	if result.Decision != Allow {
 		t.Errorf("expected Allow (fail-open), got %s", result.Decision)
@@ -116,7 +117,7 @@ func TestEval_AuditOnly_DenyNotEnforced(t *testing.T) {
 		},
 	}
 	ev := makeEvaluatorWithMode(t, config.ModeAuditOnly, config.ErrorModeClosed, rules)
-	result := ev.Evaluate(makeCall("test_op", nil))
+	result := ev.Evaluate(context.Background(), makeCall("test_op", nil))
 
 	// In audit_only mode the call is allowed even if a deny rule matches.
 	if result.Decision != Allow {
@@ -172,7 +173,7 @@ func TestEval_AuditOnly_DenyContinuesEvaluation(t *testing.T) {
 		},
 	}
 	ev := makeEvaluatorWithMode(t, config.ModeAuditOnly, config.ErrorModeClosed, rules)
-	result := ev.Evaluate(makeCall("test_op", nil))
+	result := ev.Evaluate(context.Background(), makeCall("test_op", nil))
 
 	if result.Decision != Allow {
 		t.Errorf("expected Allow in audit_only mode, got %s", result.Decision)
@@ -213,7 +214,7 @@ func TestEval_AuditOnly_RedactNotEnforced(t *testing.T) {
 		},
 	}
 	ev := makeEvaluatorWithMode(t, config.ModeAuditOnly, config.ErrorModeClosed, rules)
-	result := ev.Evaluate(makeCall("send_message", map[string]any{
+	result := ev.Evaluate(context.Background(), makeCall("send_message", map[string]any{
 		"body": "my key is AKIAIOSFODNN7EXAMPLE ok",
 	}))
 

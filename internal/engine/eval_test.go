@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -44,7 +45,7 @@ func makeCall(operation string, params map[string]any) Call {
 
 func TestEval_AllowNoRules(t *testing.T) {
 	ev := makeEvaluator(t, nil)
-	result := ev.Evaluate(makeCall("anything", nil))
+	result := ev.Evaluate(context.Background(), makeCall("anything", nil))
 	if result.Decision != Allow {
 		t.Errorf("expected Allow, got %s", result.Decision)
 	}
@@ -60,7 +61,7 @@ func TestEval_DenyMatchesOperation(t *testing.T) {
 		},
 	}
 	ev := makeEvaluator(t, rules)
-	result := ev.Evaluate(makeCall("delete_issue", nil))
+	result := ev.Evaluate(context.Background(), makeCall("delete_issue", nil))
 	if result.Decision != Deny {
 		t.Errorf("expected Deny, got %s", result.Decision)
 	}
@@ -79,7 +80,7 @@ func TestEval_DenyMatchesWhen(t *testing.T) {
 		},
 	}
 	ev := makeEvaluator(t, rules)
-	result := ev.Evaluate(makeCall("create_issue", map[string]any{"priority": int64(0)}))
+	result := ev.Evaluate(context.Background(), makeCall("create_issue", map[string]any{"priority": int64(0)}))
 	if result.Decision != Deny {
 		t.Errorf("expected Deny, got %s", result.Decision)
 	}
@@ -105,7 +106,7 @@ func TestEval_DenyShortCircuit(t *testing.T) {
 		},
 	}
 	ev := makeEvaluator(t, rules)
-	result := ev.Evaluate(makeCall("delete_issue", nil))
+	result := ev.Evaluate(context.Background(), makeCall("delete_issue", nil))
 	if result.Decision != Deny {
 		t.Fatalf("expected Deny, got %s", result.Decision)
 	}
@@ -130,7 +131,7 @@ func TestEval_Log(t *testing.T) {
 		},
 	}
 	ev := makeEvaluator(t, rules)
-	result := ev.Evaluate(makeCall("create_issue", nil))
+	result := ev.Evaluate(context.Background(), makeCall("create_issue", nil))
 	if result.Decision != Allow {
 		t.Errorf("expected Allow, got %s", result.Decision)
 	}
@@ -161,7 +162,7 @@ func TestEval_Redact(t *testing.T) {
 		},
 	}
 	ev := makeEvaluator(t, rules)
-	result := ev.Evaluate(makeCall("send_message", map[string]any{
+	result := ev.Evaluate(context.Background(), makeCall("send_message", map[string]any{
 		"body": "my key is AKIAIOSFODNN7EXAMPLE ok",
 	}))
 	if result.Decision != Redact {
@@ -201,7 +202,7 @@ func TestEval_RedactAccumulates(t *testing.T) {
 		},
 	}
 	ev := makeEvaluator(t, rules)
-	result := ev.Evaluate(makeCall("send_message", map[string]any{
+	result := ev.Evaluate(context.Background(), makeCall("send_message", map[string]any{
 		"body":  "my key is AKIAIOSFODNN7EXAMPLE ok",
 		"notes": "SSN is 123-45-6789",
 	}))
@@ -222,7 +223,7 @@ func TestEval_OperationMismatch(t *testing.T) {
 		},
 	}
 	ev := makeEvaluator(t, rules)
-	result := ev.Evaluate(makeCall("delete_issue", nil))
+	result := ev.Evaluate(context.Background(), makeCall("delete_issue", nil))
 	if result.Decision != Allow {
 		t.Errorf("expected Allow, got %s", result.Decision)
 	}
@@ -244,7 +245,7 @@ func TestEval_WhenFalse(t *testing.T) {
 		},
 	}
 	ev := makeEvaluator(t, rules)
-	result := ev.Evaluate(makeCall("create_issue", map[string]any{"priority": int64(1)}))
+	result := ev.Evaluate(context.Background(), makeCall("create_issue", map[string]any{"priority": int64(1)}))
 	if result.Decision != Allow {
 		t.Errorf("expected Allow, got %s", result.Decision)
 	}
@@ -274,7 +275,7 @@ func TestEval_AuditAlwaysPopulated(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			ev := makeEvaluator(t, tt.rules)
-			result := ev.Evaluate(makeCall("test_op", nil))
+			result := ev.Evaluate(context.Background(), makeCall("test_op", nil))
 			audit := result.Audit
 			if audit.Timestamp.IsZero() {
 				t.Error("expected non-zero timestamp")
@@ -322,7 +323,7 @@ func TestEval_SpecificityOrder(t *testing.T) {
 		},
 	}
 	ev := makeEvaluator(t, rules)
-	result := ev.Evaluate(makeCall("delete_issue", nil))
+	result := ev.Evaluate(context.Background(), makeCall("delete_issue", nil))
 	if result.Decision != Deny {
 		t.Fatalf("expected Deny, got %s", result.Decision)
 	}
@@ -349,7 +350,7 @@ func TestEval_SpecificityPreservesFileOrder(t *testing.T) {
 		},
 	}
 	ev := makeEvaluator(t, rules)
-	result := ev.Evaluate(makeCall("delete_issue", nil))
+	result := ev.Evaluate(context.Background(), makeCall("delete_issue", nil))
 	if result.Decision != Deny {
 		t.Fatalf("expected Deny, got %s", result.Decision)
 	}
@@ -376,7 +377,7 @@ func TestEval_SpecificityGlobBeforeCatchAll(t *testing.T) {
 		},
 	}
 	ev := makeEvaluator(t, rules)
-	result := ev.Evaluate(makeCall("create_issue", nil))
+	result := ev.Evaluate(context.Background(), makeCall("create_issue", nil))
 	if result.Decision != Deny {
 		t.Fatalf("expected Deny, got %s", result.Decision)
 	}
@@ -413,7 +414,7 @@ func TestEval_WithDefs(t *testing.T) {
 	ev := makeEvaluatorWithDefs(t, rules, defs)
 
 	// 6 items > 5 => deny
-	result := ev.Evaluate(makeCall("create", map[string]any{
+	result := ev.Evaluate(context.Background(), makeCall("create", map[string]any{
 		"items": []any{"a", "b", "c", "d", "e", "f"},
 	}))
 	if result.Decision != Deny {
@@ -421,7 +422,7 @@ func TestEval_WithDefs(t *testing.T) {
 	}
 
 	// 3 items <= 5 => allow
-	result = ev.Evaluate(makeCall("create", map[string]any{
+	result = ev.Evaluate(context.Background(), makeCall("create", map[string]any{
 		"items": []any{"a", "b", "c"},
 	}))
 	if result.Decision != Allow {
@@ -444,13 +445,13 @@ func TestEval_DefsListLiteral(t *testing.T) {
 	ev := makeEvaluatorWithDefs(t, rules, defs)
 
 	// Allowed team (input lowered to "team-eng") => allow
-	result := ev.Evaluate(makeCall("create", map[string]any{"team": "TEAM-ENG"}))
+	result := ev.Evaluate(context.Background(), makeCall("create", map[string]any{"team": "TEAM-ENG"}))
 	if result.Decision != Allow {
 		t.Errorf("expected Allow for TEAM-ENG, got %s", result.Decision)
 	}
 
 	// Disallowed team => deny
-	result = ev.Evaluate(makeCall("create", map[string]any{"team": "TEAM-SALES"}))
+	result = ev.Evaluate(context.Background(), makeCall("create", map[string]any{"team": "TEAM-SALES"}))
 	if result.Decision != Deny {
 		t.Errorf("expected Deny for TEAM-SALES, got %s", result.Decision)
 	}
@@ -470,12 +471,12 @@ func TestEval_DefsStringLiteral(t *testing.T) {
 	}
 	ev := makeEvaluatorWithDefs(t, rules, defs)
 
-	result := ev.Evaluate(makeCall("push", map[string]any{"branch": "agent/fix-123"}))
+	result := ev.Evaluate(context.Background(), makeCall("push", map[string]any{"branch": "agent/fix-123"}))
 	if result.Decision != Deny {
 		t.Errorf("expected Deny for agent/ branch, got %s", result.Decision)
 	}
 
-	result = ev.Evaluate(makeCall("push", map[string]any{"branch": "main"}))
+	result = ev.Evaluate(context.Background(), makeCall("push", map[string]any{"branch": "main"}))
 	if result.Decision != Allow {
 		t.Errorf("expected Allow for main branch, got %s", result.Decision)
 	}
@@ -505,7 +506,7 @@ func TestEval_RedactSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	result := ev.Evaluate(Call{
+	result := ev.Evaluate(context.Background(), Call{
 		Operation: "llm.text",
 		Params:    map[string]any{"text": "key is AKIAIOSFODNN7REALKEY"},
 		Context:   CallContext{Timestamp: time.Now()},
@@ -541,7 +542,7 @@ func TestEval_HasSecretsInWhen(t *testing.T) {
 	}
 
 	// Should deny when text contains a secret.
-	result := ev.Evaluate(Call{
+	result := ev.Evaluate(context.Background(), Call{
 		Operation: "llm.text",
 		Params:    map[string]any{"text": "key is AKIAIOSFODNN7REALKEY"},
 		Context:   CallContext{Timestamp: time.Now()},
@@ -551,7 +552,7 @@ func TestEval_HasSecretsInWhen(t *testing.T) {
 	}
 
 	// Should allow when text is clean.
-	result = ev.Evaluate(Call{
+	result = ev.Evaluate(context.Background(), Call{
 		Operation: "llm.text",
 		Params:    map[string]any{"text": "nothing secret here"},
 		Context:   CallContext{Timestamp: time.Now()},
@@ -591,7 +592,7 @@ func TestEval_CaseInsensitiveParamsMatch(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := ev.Evaluate(Call{
+			result := ev.Evaluate(context.Background(), Call{
 				Operation: tt.op,
 				Params:    map[string]any{"name": tt.toolName},
 				Context:   CallContext{Direction: "response"},
@@ -618,7 +619,7 @@ func TestEval_CaseInsensitiveAuditPreservesOriginal(t *testing.T) {
 
 	ev := makeEvaluatorWithOpts(t, rules, false)
 
-	result := ev.Evaluate(Call{
+	result := ev.Evaluate(context.Background(), Call{
 		Operation: "LLM.Tool_Use",
 		Params:    map[string]any{"name": "Bash"},
 		Context:   CallContext{Direction: "response"},
@@ -644,7 +645,7 @@ func TestEval_CaseInsensitiveContext(t *testing.T) {
 
 	ev := makeEvaluatorWithOpts(t, rules, false)
 
-	result := ev.Evaluate(Call{
+	result := ev.Evaluate(context.Background(), Call{
 		Operation: "test",
 		Params:    map[string]any{},
 		Context: CallContext{
@@ -670,7 +671,7 @@ func TestEval_CaseSensitiveScope(t *testing.T) {
 	ev := makeEvaluatorWithOpts(t, rules, true)
 
 	// Exact case matches
-	result := ev.Evaluate(Call{
+	result := ev.Evaluate(context.Background(), Call{
 		Operation: "vault.lookup",
 		Params:    map[string]any{"token": "sk-live-abc123"},
 	})
@@ -679,7 +680,7 @@ func TestEval_CaseSensitiveScope(t *testing.T) {
 	}
 
 	// Wrong param case does NOT match
-	result = ev.Evaluate(Call{
+	result = ev.Evaluate(context.Background(), Call{
 		Operation: "vault.lookup",
 		Params:    map[string]any{"token": "SK-LIVE-ABC123"},
 	})
@@ -688,7 +689,7 @@ func TestEval_CaseSensitiveScope(t *testing.T) {
 	}
 
 	// Wrong operation case does NOT match
-	result = ev.Evaluate(Call{
+	result = ev.Evaluate(context.Background(), Call{
 		Operation: "Vault.Lookup",
 		Params:    map[string]any{"token": "sk-live-abc123"},
 	})
@@ -751,7 +752,7 @@ func TestEval_CaseInsensitiveFullPipeline(t *testing.T) {
 	}
 
 	t.Run("deny matches case-insensitively", func(t *testing.T) {
-		result := ev.Evaluate(Call{
+		result := ev.Evaluate(context.Background(), Call{
 			Operation: "LLM.Tool_Use",
 			Params:    map[string]any{"name": "Bash"},
 			Context:   CallContext{Timestamp: time.Now()},
@@ -765,7 +766,7 @@ func TestEval_CaseInsensitiveFullPipeline(t *testing.T) {
 	})
 
 	t.Run("hasSecrets detects original-case AWS key", func(t *testing.T) {
-		result := ev.Evaluate(Call{
+		result := ev.Evaluate(context.Background(), Call{
 			Operation: "llm.text",
 			Params:    map[string]any{"text": "key is AKIAIOSFODNN7REALKEY"},
 			Context:   CallContext{Timestamp: time.Now()},
@@ -776,7 +777,7 @@ func TestEval_CaseInsensitiveFullPipeline(t *testing.T) {
 	})
 
 	t.Run("regex redaction matches original-case patterns", func(t *testing.T) {
-		result := ev.Evaluate(Call{
+		result := ev.Evaluate(context.Background(), Call{
 			Operation: "llm.tool_result",
 			Params:    map[string]any{"content": "token is SECRET_API_KEY here"},
 			Context:   CallContext{Timestamp: time.Now()},
@@ -823,7 +824,7 @@ func TestEval_DenyParamsSummaryUsesOriginalCase(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		result := ev.Evaluate(Call{
+		result := ev.Evaluate(context.Background(), Call{
 			Operation: "llm.tool_use",
 			Params:    map[string]any{"name": "Bash"},
 			Context:   CallContext{Timestamp: time.Now()},
@@ -851,7 +852,7 @@ func TestEval_DenyParamsSummaryUsesOriginalCase(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		result := ev.Evaluate(Call{
+		result := ev.Evaluate(context.Background(), Call{
 			Operation: "llm.tool_use",
 			Params:    map[string]any{"name": "Bash"},
 			Context:   CallContext{Timestamp: time.Now()},
@@ -896,7 +897,7 @@ func TestEval_CaseInsensitiveRedactThenDeny(t *testing.T) {
 
 	ev := makeEvaluatorWithOpts(t, rules, false)
 
-	result := ev.Evaluate(Call{
+	result := ev.Evaluate(context.Background(), Call{
 		Operation: "API.Call",
 		Params:    map[string]any{"body": "auth token_abc123 here"},
 		Context:   CallContext{Timestamp: time.Now()},
@@ -907,5 +908,38 @@ func TestEval_CaseInsensitiveRedactThenDeny(t *testing.T) {
 	// Audit params summary should show redacted value (from params.original).
 	if strings.Contains(result.Audit.ParamsSummary, "token_abc123") {
 		t.Error("audit params summary should show redacted value, but found original token")
+	}
+}
+
+func TestEvaluateJudgeActionDeny(t *testing.T) {
+	celEnv, _ := keepcel.NewEnv()
+	rules := []config.Rule{{
+		Name:   "safety-check",
+		Match:  config.Match{Operation: "*"},
+		Action: config.ActionJudge,
+		Judge: &config.JudgeSpec{
+			Model:   "haiku",
+			Prompt:  "Is this safe?",
+			Timeout: "5s",
+			OnError: string(config.ErrorModeClosed),
+		},
+	}}
+
+	judgeFunc := func(ctx context.Context, model, prompt, content string) (JudgeResult, error) {
+		return JudgeResult{Decision: "deny", Reason: "unsafe content"}, nil
+	}
+
+	ev, err := NewEvaluator(celEnv, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("NewEvaluator: %v", err)
+	}
+	ev.SetJudgeFunc(judgeFunc)
+
+	result := ev.Evaluate(context.Background(), Call{Operation: "anything"})
+	if result.Decision != Deny {
+		t.Errorf("Decision = %q, want %q", result.Decision, Deny)
+	}
+	if result.Rule != "safety-check" {
+		t.Errorf("Rule = %q, want %q", result.Rule, "safety-check")
 	}
 }

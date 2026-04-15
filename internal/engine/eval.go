@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"sort"
@@ -80,9 +81,37 @@ type RuleResult struct {
 	Matched      bool
 	Action       string
 	Skipped      bool
-	Error        bool   // true if a CEL eval error occurred for this rule
-	ErrorMessage string // the CEL eval error message, populated when Error is true
+	Error        bool        // true if a CEL eval error occurred for this rule
+	ErrorMessage string      // the CEL eval error message, populated when Error is true
+	Judge        *JudgeAudit `json:"judge,omitempty"`
 }
+
+// JudgeAudit records the result of a judge call.
+type JudgeAudit struct {
+	Model     string     `json:"model"`
+	Verdict   string     `json:"verdict"`
+	Reason    string     `json:"reason"`
+	LatencyMS int64      `json:"latency_ms"`
+	Usage     JudgeUsage `json:"usage"`
+	Error     string     `json:"error,omitempty"`
+}
+
+// JudgeUsage tracks token consumption for a judge call.
+type JudgeUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+// JudgeResult holds the raw result from a judge call at the engine level.
+type JudgeResult struct {
+	Decision     string
+	Reason       string
+	InputTokens  int
+	OutputTokens int
+}
+
+// JudgeHandler is the function signature for judge evaluation.
+type JudgeHandler func(ctx context.Context, model, prompt, content string) (JudgeResult, error)
 
 // compiledRule pairs a parsed rule with its compiled CEL program and redact patterns.
 type compiledRule struct {
@@ -99,6 +128,12 @@ type Evaluator struct {
 	scope         string
 	secrets       *secrets.Detector
 	caseSensitive bool
+	judgeFunc     JudgeHandler
+}
+
+// SetJudgeFunc sets the judge handler for this evaluator.
+func (ev *Evaluator) SetJudgeFunc(fn JudgeHandler) {
+	ev.judgeFunc = fn
 }
 
 // NewEvaluator creates an evaluator for a scope. Compiles all CEL expressions
@@ -168,7 +203,7 @@ func NewEvaluator(
 }
 
 // Evaluate runs all rules against the given call and returns the result.
-func (ev *Evaluator) Evaluate(call Call) EvalResult {
+func (ev *Evaluator) Evaluate(ctx context.Context, call Call) EvalResult {
 	celCtx := map[string]any{
 		"agent_id":  call.Context.AgentID,
 		"user_id":   call.Context.UserID,
@@ -348,6 +383,145 @@ func (ev *Evaluator) Evaluate(call Call) EvalResult {
 					mutations = append(mutations, m...)
 				}
 			}
+
+		case config.ActionJudge:
+			if cr.rule.Judge == nil {
+				continue
+			}
+
+			content := extractJudgeContent(call.Params)
+			model := cr.rule.Judge.Model
+			prompt := cr.rule.Judge.Prompt
+
+			// Parse timeout (default 5s).
+			timeout := 5 * time.Second
+			if cr.rule.Judge.Timeout != "" {
+				if d, err := time.ParseDuration(cr.rule.Judge.Timeout); err == nil {
+					timeout = d
+				}
+			}
+
+			// Determine onError mode (default closed).
+			judgeOnError := config.ErrorModeClosed
+			if cr.rule.Judge.OnError == string(config.ErrorModeOpen) {
+				judgeOnError = config.ErrorModeOpen
+			}
+
+			// Record audit for the last rule result.
+			ruleIdx := len(rulesEvaluated) - 1
+
+			if ev.judgeFunc == nil {
+				errMsg := "judge function not configured"
+				rulesEvaluated[ruleIdx].Judge = &JudgeAudit{
+					Model: model,
+					Error: errMsg,
+				}
+				if judgeOnError == config.ErrorModeClosed && !auditOnly {
+					msg := fmt.Sprintf("Rule %q: %s. Call denied (fail-closed).", cr.rule.Name, errMsg)
+					return EvalResult{
+						Decision: Deny,
+						Rule:     cr.rule.Name,
+						Message:  msg,
+						Audit: AuditEntry{
+							Timestamp:      call.Context.Timestamp,
+							Scope:          ev.scope,
+							Operation:      call.Operation,
+							AgentID:        call.Context.AgentID,
+							UserID:         call.Context.UserID,
+							Direction:      call.Context.Direction,
+							Decision:       Deny,
+							Rule:           cr.rule.Name,
+							Message:        msg,
+							RulesEvaluated: rulesEvaluated,
+							ParamsSummary:  paramsSummary(params.original),
+							Enforced:       true,
+						},
+					}
+				}
+				continue
+			}
+
+			judgeCtx, judgeCancel := context.WithTimeout(ctx, timeout)
+			start := time.Now()
+			jr, judgeErr := ev.judgeFunc(judgeCtx, model, prompt, content)
+			elapsed := time.Since(start)
+			judgeCancel()
+
+			audit := &JudgeAudit{
+				Model:     model,
+				LatencyMS: elapsed.Milliseconds(),
+			}
+
+			if judgeErr != nil {
+				audit.Error = judgeErr.Error()
+				rulesEvaluated[ruleIdx].Judge = audit
+
+				if judgeOnError == config.ErrorModeClosed && !auditOnly {
+					msg := fmt.Sprintf("Rule %q: judge error: %s. Call denied (fail-closed).", cr.rule.Name, judgeErr.Error())
+					return EvalResult{
+						Decision: Deny,
+						Rule:     cr.rule.Name,
+						Message:  msg,
+						Audit: AuditEntry{
+							Timestamp:      call.Context.Timestamp,
+							Scope:          ev.scope,
+							Operation:      call.Operation,
+							AgentID:        call.Context.AgentID,
+							UserID:         call.Context.UserID,
+							Direction:      call.Context.Direction,
+							Decision:       Deny,
+							Rule:           cr.rule.Name,
+							Message:        msg,
+							RulesEvaluated: rulesEvaluated,
+							ParamsSummary:  paramsSummary(params.original),
+							Enforced:       true,
+						},
+					}
+				}
+				continue
+			}
+
+			audit.Verdict = jr.Decision
+			audit.Reason = jr.Reason
+			audit.Usage = JudgeUsage{
+				InputTokens:  jr.InputTokens,
+				OutputTokens: jr.OutputTokens,
+			}
+			rulesEvaluated[ruleIdx].Judge = audit
+
+			if jr.Decision == "deny" {
+				msg := cr.rule.Message
+				if msg == "" {
+					msg = fmt.Sprintf("denied by judge: %s", jr.Reason)
+				}
+				if !auditOnly {
+					return EvalResult{
+						Decision: Deny,
+						Rule:     cr.rule.Name,
+						Message:  msg,
+						Audit: AuditEntry{
+							Timestamp:      call.Context.Timestamp,
+							Scope:          ev.scope,
+							Operation:      call.Operation,
+							AgentID:        call.Context.AgentID,
+							UserID:         call.Context.UserID,
+							Direction:      call.Context.Direction,
+							Decision:       Deny,
+							Rule:           cr.rule.Name,
+							Message:        msg,
+							RulesEvaluated: rulesEvaluated,
+							ParamsSummary:  paramsSummary(params.original),
+							Enforced:       true,
+						},
+					}
+				}
+				if !auditDenied {
+					auditDenied = true
+					auditDenyRule = cr.rule.Name
+					auditDenyMessage = msg
+				}
+			}
+			// allow → continue evaluating
 		}
 	}
 
@@ -500,6 +674,18 @@ func getNestedString(params map[string]any, keys []string) string {
 		current = nested
 	}
 	return ""
+}
+
+// extractJudgeContent extracts the text content from call params for judge evaluation.
+func extractJudgeContent(params map[string]any) string {
+	if text, ok := params["text"].(string); ok {
+		return text
+	}
+	if content, ok := params["content"].(string); ok {
+		return content
+	}
+	b, _ := json.Marshal(params)
+	return string(b)
 }
 
 // paramsSummary returns a JSON-serialized summary of params, truncated to 256 runes.

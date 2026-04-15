@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"testing"
 
 	keepcel "github.com/majorcontext/keep/internal/cel"
@@ -52,7 +53,7 @@ func TestLLMCombined_SecretAndPII_DenyTakesPrecedence(t *testing.T) {
 
 	// A prompt with BOTH a secret AND an email. The PII deny should fire.
 	text := "Customer jane@example.com has key AKIAIOSFODNN7REALKEY"
-	result := ev.Evaluate(makeLLMTextCall(text, "request"))
+	result := ev.Evaluate(context.Background(), makeLLMTextCall(text, "request"))
 
 	if result.Decision != Deny {
 		t.Errorf("expected deny (PII), got %s (rule=%s)", result.Decision, result.Rule)
@@ -64,7 +65,7 @@ func TestLLMCombined_SecretOnly_Redacted(t *testing.T) {
 
 	// Secret without PII: should redact, not deny.
 	text := "Use key AKIAIOSFODNN7REALKEY to call the API"
-	result := ev.Evaluate(makeLLMTextCall(text, "request"))
+	result := ev.Evaluate(context.Background(), makeLLMTextCall(text, "request"))
 
 	if result.Decision != Redact {
 		t.Errorf("expected redact, got %s (rule=%s)", result.Decision, result.Rule)
@@ -76,7 +77,7 @@ func TestLLMCombined_PIIOnly_Denied(t *testing.T) {
 
 	// PII without secret: should deny.
 	text := "The customer john.smith@example.com reported a bug"
-	result := ev.Evaluate(makeLLMTextCall(text, "request"))
+	result := ev.Evaluate(context.Background(), makeLLMTextCall(text, "request"))
 
 	if result.Decision != Deny {
 		t.Errorf("expected deny, got %s (rule=%s)", result.Decision, result.Rule)
@@ -88,7 +89,7 @@ func TestLLMCombined_CleanPrompt_Allowed(t *testing.T) {
 
 	// No secrets, no PII: should pass through.
 	text := "What is the weather in San Francisco?"
-	result := ev.Evaluate(makeLLMTextCall(text, "request"))
+	result := ev.Evaluate(context.Background(), makeLLMTextCall(text, "request"))
 
 	if result.Decision != Allow {
 		t.Errorf("expected allow, got %s (rule=%s)", result.Decision, result.Rule)

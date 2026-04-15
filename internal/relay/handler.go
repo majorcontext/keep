@@ -48,7 +48,7 @@ func (h *RelayHandler) HandleToolCall(ctx context.Context, name string, args map
 	}
 
 	// 3. Evaluate policy
-	result, err := h.engine.Evaluate(call, route.Scope)
+	result, err := h.engine.Evaluate(ctx, call, route.Scope)
 	if err != nil {
 		return nil, fmt.Errorf("policy evaluation error: %w", err)
 	}
@@ -79,7 +79,7 @@ func (h *RelayHandler) HandleToolCall(ctx context.Context, name string, args map
 	}
 
 	// 7. Evaluate response-side policy
-	toolResult, err = h.evaluateResponse(name, route.Scope, toolResult)
+	toolResult, err = h.evaluateResponse(ctx, name, route.Scope, toolResult)
 	if err != nil {
 		return nil, err
 	}
@@ -90,7 +90,7 @@ func (h *RelayHandler) HandleToolCall(ctx context.Context, name string, args map
 // evaluateResponse runs policy evaluation on the upstream response.
 // It extracts text content blocks, evaluates them against response-direction
 // rules, and applies any deny or redact decisions.
-func (h *RelayHandler) evaluateResponse(name, scope string, toolResult *mcp.ToolCallResult) (*mcp.ToolCallResult, error) {
+func (h *RelayHandler) evaluateResponse(ctx context.Context, name, scope string, toolResult *mcp.ToolCallResult) (*mcp.ToolCallResult, error) {
 	if toolResult == nil || len(toolResult.Content) == 0 {
 		return toolResult, nil
 	}
@@ -121,7 +121,7 @@ func (h *RelayHandler) evaluateResponse(name, scope string, toolResult *mcp.Tool
 		},
 	}
 
-	result, err := h.engine.Evaluate(call, scope)
+	result, err := h.engine.Evaluate(ctx, call, scope)
 	if err != nil {
 		return nil, fmt.Errorf("response policy evaluation error: %w", err)
 	}

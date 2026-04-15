@@ -1,6 +1,9 @@
 package keep
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 // BenchmarkSafeEvaluateOverhead compares Engine.Evaluate vs SafeEvaluate
 // on the happy path to quantify the defer/recover overhead.
@@ -25,14 +28,14 @@ rules:
 	b.Run("Engine.Evaluate", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_, _ = eng.Evaluate(call, "bench")
+			_, _ = eng.Evaluate(context.Background(), call, "bench")
 		}
 	})
 
 	b.Run("SafeEvaluate", func(b *testing.B) {
 		b.ReportAllocs()
 		for i := 0; i < b.N; i++ {
-			_, _ = SafeEvaluate(eng, call, "bench")
+			_, _ = SafeEvaluate(context.Background(), eng, call, "bench")
 		}
 	})
 }

@@ -1,6 +1,7 @@
 package keep
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"time"
@@ -11,14 +12,14 @@ import (
 // SafeEvaluate wraps Engine.Evaluate with panic recovery so the host process
 // never crashes due to a policy evaluation bug. On panic it returns
 // EvalResult{Decision: Deny} and an error describing the panic (fail-closed).
-func SafeEvaluate(eng *Engine, call Call, scope string) (result EvalResult, err error) {
+func SafeEvaluate(ctx context.Context, eng *Engine, call Call, scope string) (result EvalResult, err error) {
 	defer func() {
 		if r := recover(); r != nil {
 			err = fmt.Errorf("keep: panic during evaluation: %v", r)
 			result = EvalResult{Decision: Deny}
 		}
 	}()
-	return eng.Evaluate(call, scope)
+	return eng.Evaluate(ctx, call, scope)
 }
 
 // NewHTTPCall constructs a Call for HTTP request policy evaluation.

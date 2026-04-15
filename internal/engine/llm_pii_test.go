@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"testing"
 
 	keepcel "github.com/majorcontext/keep/internal/cel"
@@ -66,7 +67,7 @@ func TestLLMPII_EmailVariants(t *testing.T) {
 
 	for _, tc := range mustDeny {
 		t.Run(tc.name, func(t *testing.T) {
-			result := ev.Evaluate(makeLLMTextCall(tc.text, "request"))
+			result := ev.Evaluate(context.Background(), makeLLMTextCall(tc.text, "request"))
 			if result.Decision != Deny {
 				t.Errorf("expected deny for PII, got %s for text: %s", result.Decision, tc.text)
 			}
@@ -93,7 +94,7 @@ func TestLLMPII_NotEmails(t *testing.T) {
 
 	for _, tc := range mustAllow {
 		t.Run(tc.name, func(t *testing.T) {
-			result := ev.Evaluate(makeLLMTextCall(tc.text, "request"))
+			result := ev.Evaluate(context.Background(), makeLLMTextCall(tc.text, "request"))
 			if result.Decision == Deny && result.Rule == "block-pii-in-prompts" {
 				t.Errorf("expected allow, got deny for: %s", tc.text)
 			}
@@ -105,7 +106,7 @@ func TestLLMPII_DirectionMatters(t *testing.T) {
 	ev := makeLLMPIIEvaluator(t)
 
 	// PII rule should only fire on requests, not responses.
-	result := ev.Evaluate(makeLLMTextCall("Contact jane@example.com for details", "response"))
+	result := ev.Evaluate(context.Background(), makeLLMTextCall("Contact jane@example.com for details", "response"))
 	if result.Decision == Deny && result.Rule == "block-pii-in-prompts" {
 		t.Error("PII rule should not fire on response direction")
 	}

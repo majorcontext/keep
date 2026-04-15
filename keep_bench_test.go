@@ -1,6 +1,7 @@
 package keep_test
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,7 +28,7 @@ func BenchmarkEvaluate_Allow(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = eng.Evaluate(call, "linear-tools")
+		_, _ = eng.Evaluate(context.Background(), call, "linear-tools")
 	}
 }
 
@@ -47,7 +48,7 @@ func BenchmarkEvaluate_Deny(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = eng.Evaluate(call, "linear-tools")
+		_, _ = eng.Evaluate(context.Background(), call, "linear-tools")
 	}
 }
 
@@ -67,7 +68,7 @@ func BenchmarkEvaluate_Redact(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = eng.Evaluate(call, "anthropic-gateway")
+		_, _ = eng.Evaluate(context.Background(), call, "anthropic-gateway")
 	}
 }
 
@@ -106,6 +107,6 @@ func BenchmarkEvaluate_ManyRules(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = eng.Evaluate(call, "bench-scope")
+		_, _ = eng.Evaluate(context.Background(), call, "bench-scope")
 	}
 }
