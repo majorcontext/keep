@@ -1,0 +1,33 @@
+scope: vibe-check
+mode: enforce
+
+rules:
+  # Screen for profanity and vulgar language
+  - name: language-check
+    match:
+      operation: "llm.text"
+      when: 'context.direction == "request" && params.role == "user"'
+    action: judge
+    judge:
+      model: haiku
+      prompt: "Does this message contain profanity, curse words, or vulgar language? Respond with deny if yes, allow if no."
+      timeout: 5s
+      on_error: closed
+
+  # Screen for passive-aggression, hostility, unprofessional tone
+  - name: vibe-check
+    match:
+      operation: "llm.text"
+      when: 'context.direction == "request" && params.role == "user"'
+    action: judge
+    judge:
+      model: haiku
+      prompt: "Is this message professional and appropriate in tone? Respond with deny if the message is passive-aggressive, hostile, sarcastic, or unprofessional. Allow if it is neutral or polite."
+      timeout: 5s
+      on_error: closed
+
+  # Log everything for the audit trail
+  - name: audit-all
+    match:
+      operation: "llm.*"
+    action: log
