@@ -156,7 +156,7 @@ run_scenario() {
 
   RESPONSE=$(claude -p "$prompt" \
     --model claude-haiku-4-5-20251001 \
-    --max-turns 1 2>&1 || true)
+    --max-turns 3 2>&1 || true)
 
   echo -e "${BOLD}${expect_color}Agent response:${RESET}"
   echo ""
