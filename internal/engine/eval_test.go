@@ -1117,3 +1117,48 @@ func TestEvaluateJudgeAuditOnly(t *testing.T) {
 		t.Errorf("Audit.Decision = %q, want %q", result.Audit.Decision, Deny)
 	}
 }
+
+func TestEvaluateJudgeCachedAudit(t *testing.T) {
+	rules := []config.Rule{{
+		Name:   "cached-rule",
+		Match:  config.Match{Operation: "llm.text"},
+		Action: config.ActionJudge,
+		Judge: &config.JudgeSpec{
+			Model:   "haiku",
+			Prompt:  "safe?",
+			Timeout: "5s",
+			OnError: "closed",
+		},
+	}}
+
+	env, err := keepcel.NewEnv()
+	if err != nil {
+		t.Fatalf("NewEnv: %v", err)
+	}
+	ev, err := NewEvaluator(env, "test", config.ModeEnforce, config.ErrorModeClosed, rules, nil, nil, nil, false)
+	if err != nil {
+		t.Fatalf("NewEvaluator: %v", err)
+	}
+	ev.SetJudgeFunc(func(_ context.Context, model, prompt, content string) (JudgeResult, error) {
+		return JudgeResult{
+			Decision: "allow",
+			Reason:   "looks good",
+			Cached:   true,
+		}, nil
+	})
+
+	result := ev.Evaluate(context.Background(), Call{
+		Operation: "llm.text",
+		Params:    map[string]any{"text": "hello"},
+	})
+
+	for _, r := range result.Audit.RulesEvaluated {
+		if r.Name == "cached-rule" && r.Judge != nil {
+			if !r.Judge.Cached {
+				t.Error("JudgeAudit.Cached should be true")
+			}
+			return
+		}
+	}
+	t.Error("cached-rule not found in audit")
+}

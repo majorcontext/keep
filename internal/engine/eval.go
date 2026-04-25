@@ -91,6 +91,7 @@ type JudgeAudit struct {
 	Model     string     `json:"model"`
 	Verdict   string     `json:"verdict"`
 	Reason    string     `json:"reason"`
+	Cached    bool       `json:"cached,omitempty"`
 	LatencyMS int64      `json:"latency_ms"`
 	Usage     JudgeUsage `json:"usage"`
 	Error     string     `json:"error,omitempty"`
@@ -484,6 +485,7 @@ func (ev *Evaluator) Evaluate(ctx context.Context, call Call) EvalResult {
 
 			audit.Verdict = jr.Decision
 			audit.Reason = jr.Reason
+			audit.Cached = jr.Cached
 			audit.Usage = JudgeUsage{
 				InputTokens:  jr.InputTokens,
 				OutputTokens: jr.OutputTokens,
