@@ -425,6 +425,7 @@ func judgeAdapter(fn JudgeFunc) engine.JudgeHandler {
 			Reason:       v.Reason,
 			InputTokens:  v.Usage.InputTokens,
 			OutputTokens: v.Usage.OutputTokens,
+			Cached:       v.Cached,
 		}, nil
 	}
 }

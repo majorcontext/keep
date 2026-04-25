@@ -108,6 +108,7 @@ type JudgeResult struct {
 	Reason       string
 	InputTokens  int
 	OutputTokens int
+	Cached       bool
 }
 
 // JudgeHandler is the function signature for judge evaluation.
