@@ -86,10 +86,12 @@ for line in open('$1'):
             verdict = j.get('verdict', '?')
             reason = j.get('reason', '')
             ms = j.get('latency_ms', 0)
+            cached = j.get('cached', False)
+            cache_tag = ' (cached)' if cached else ''
             vc = '\033[32m' if verdict == 'allow' else '\033[31m'
             if len(reason) > 100:
                 reason = reason[:100] + '...'
-            print(f'    {magenta}\u2728 {model}{reset}: {vc}{verdict}{reset} ({ms}ms) \u2014 {dim}{reason}{reset}')
+            print(f'    {magenta}\u2728 {model}{reset}: {vc}{verdict}{reset} ({ms}ms){cache_tag} \u2014 {dim}{reason}{reset}')
     except: pass
 " 2>/dev/null
 }

@@ -16,6 +16,7 @@ import (
 	"github.com/majorcontext/keep/internal/relay"
 	relayconfig "github.com/majorcontext/keep/internal/relay/config"
 	"github.com/majorcontext/keep/internal/relay/mcp"
+	"github.com/majorcontext/keep/judge"
 	anthropicjudge "github.com/majorcontext/keep/judge/anthropic"
 	openaijudge "github.com/majorcontext/keep/judge/openai"
 )
@@ -54,14 +55,16 @@ func main() {
 					jopts = append(jopts, anthropicjudge.WithBaseURL(cfg.Judge.BaseURL))
 				}
 				p := anthropicjudge.New(apiKey, jopts...)
-				engineOpts = append(engineOpts, keep.WithJudge(p.Judge))
+				cached := judge.NewCache(p)
+				engineOpts = append(engineOpts, keep.WithJudge(cached.Judge))
 			case "openai":
 				var jopts []openaijudge.Option
 				if cfg.Judge.BaseURL != "" {
 					jopts = append(jopts, openaijudge.WithBaseURL(cfg.Judge.BaseURL))
 				}
 				p := openaijudge.New(apiKey, jopts...)
-				engineOpts = append(engineOpts, keep.WithJudge(p.Judge))
+				cached := judge.NewCache(p)
+				engineOpts = append(engineOpts, keep.WithJudge(cached.Judge))
 			}
 		}
 	}
