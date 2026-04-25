@@ -31,7 +31,7 @@ GW_PID=""
 # ── Prompts ──────────────────────────────────────────────────────
 
 # Scenario 1: Polite request — should be allowed
-PROMPT_1="Could you help me understand how the caching layer works? I'm new to this part of the codebase."
+PROMPT_1="Could you explain the difference between a mutex and a semaphore?"
 
 # Scenario 2: Classic passive-aggressive — should be denied by vibe-check
 PROMPT_2="Per my last email, I already explained this. Please advise."
@@ -175,7 +175,7 @@ run_scenario() {
 
 run_scenario 1 \
   "Polite request ${DIM}(good vibes)${RESET}" \
-  "A genuine, professional question. Both judges allow it through." \
+  "A polite, professional question. Both judges allow it through." \
   "$PROMPT_1" \
   "$GREEN"
 
