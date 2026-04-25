@@ -19,6 +19,7 @@ type Verdict struct {
 	Decision Decision // allow or deny
 	Reason   string   // LLM's reasoning
 	Usage    Usage    // Token consumption
+	Cached   bool     // true if returned from cache
 }
 
 // Decision is the judge's binary outcome.
