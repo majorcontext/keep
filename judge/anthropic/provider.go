@@ -44,6 +44,7 @@ func New(apiKey string, opts ...Option) *Provider {
 }
 
 // Judge evaluates content against a policy prompt using the Anthropic Messages API.
+// It uses forced tool use to guarantee structured JSON output.
 func (p *Provider) Judge(ctx context.Context, req judge.Request) (judge.Verdict, error) {
 	model := ResolveModel(req.Model)
 
@@ -54,10 +55,32 @@ func (p *Provider) Judge(ctx context.Context, req judge.Request) (judge.Verdict,
 			"role": "user",
 			"content": fmt.Sprintf(
 				"You are a policy judge. Evaluate the following content against this criteria:\n\n"+
-					"Criteria: %s\n\nContent: %s\n\n"+
-					"Respond with ONLY a JSON object: {\"decision\": \"allow\" or \"deny\", \"reason\": \"brief explanation\"}",
+					"Criteria: %s\n\nContent: %s",
 				req.Prompt, req.Content),
 		}},
+		"tools": []map[string]any{{
+			"name":        "verdict",
+			"description": "Return your judgment as a structured verdict.",
+			"input_schema": map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"decision": map[string]any{
+						"type":        "string",
+						"enum":        []string{"allow", "deny"},
+						"description": "Whether to allow or deny the content.",
+					},
+					"reason": map[string]any{
+						"type":        "string",
+						"description": "Brief explanation for the decision.",
+					},
+				},
+				"required": []string{"decision", "reason"},
+			},
+		}},
+		"tool_choice": map[string]any{
+			"type": "tool",
+			"name": "verdict",
+		},
 	}
 
 	jsonBody, err := json.Marshal(body)
@@ -94,8 +117,8 @@ func (p *Provider) Judge(ctx context.Context, req judge.Request) (judge.Verdict,
 func parseResponse(body []byte) (judge.Verdict, error) {
 	var apiResp struct {
 		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+			Type  string          `json:"type"`
+			Input json.RawMessage `json:"input"`
 		} `json:"content"`
 		Usage struct {
 			InputTokens  int `json:"input_tokens"`
@@ -106,16 +129,24 @@ func parseResponse(body []byte) (judge.Verdict, error) {
 		return judge.Verdict{}, fmt.Errorf("parse response: %w", err)
 	}
 
-	if len(apiResp.Content) == 0 {
-		return judge.Verdict{}, fmt.Errorf("empty response from judge")
+	// Find the tool_use content block.
+	var toolInput json.RawMessage
+	for _, block := range apiResp.Content {
+		if block.Type == "tool_use" {
+			toolInput = block.Input
+			break
+		}
+	}
+	if toolInput == nil {
+		return judge.Verdict{}, fmt.Errorf("no tool_use block in judge response")
 	}
 
 	var verdict struct {
 		Decision string `json:"decision"`
 		Reason   string `json:"reason"`
 	}
-	if err := json.Unmarshal([]byte(apiResp.Content[0].Text), &verdict); err != nil {
-		return judge.Verdict{}, fmt.Errorf("parse verdict JSON: %w", err)
+	if err := json.Unmarshal(toolInput, &verdict); err != nil {
+		return judge.Verdict{}, fmt.Errorf("parse verdict: %w", err)
 	}
 
 	var d judge.Decision

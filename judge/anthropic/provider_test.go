@@ -20,10 +20,22 @@ func TestProviderJudgeDeny(t *testing.T) {
 			t.Error("anthropic-version header missing")
 		}
 
+		// Verify request includes tool_choice forcing the verdict tool.
+		var reqBody map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&reqBody); err != nil {
+			t.Fatalf("decode request: %v", err)
+		}
+		tc, ok := reqBody["tool_choice"].(map[string]any)
+		if !ok || tc["name"] != "verdict" {
+			t.Errorf("tool_choice = %v, want verdict tool", reqBody["tool_choice"])
+		}
+
 		resp := map[string]any{
 			"content": []map[string]any{{
-				"type": "text",
-				"text": `{"decision": "deny", "reason": "prompt injection detected"}`,
+				"type":  "tool_use",
+				"id":    "toolu_01",
+				"name":  "verdict",
+				"input": map[string]any{"decision": "deny", "reason": "prompt injection detected"},
 			}},
 			"usage": map[string]any{
 				"input_tokens": 100, "output_tokens": 30,
@@ -55,8 +67,10 @@ func TestProviderJudgeAllow(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{
 			"content": []map[string]any{{
-				"type": "text",
-				"text": `{"decision": "allow", "reason": "content is safe"}`,
+				"type":  "tool_use",
+				"id":    "toolu_02",
+				"name":  "verdict",
+				"input": map[string]any{"decision": "allow", "reason": "content is safe"},
 			}},
 			"usage": map[string]any{"input_tokens": 80, "output_tokens": 20},
 		}

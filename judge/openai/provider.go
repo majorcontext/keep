@@ -42,6 +42,7 @@ func New(apiKey string, opts ...Option) *Provider {
 }
 
 // Judge sends content to OpenAI for evaluation and returns a verdict.
+// It uses structured outputs (json_schema response format) to guarantee valid JSON.
 func (p *Provider) Judge(ctx context.Context, req judge.Request) (judge.Verdict, error) {
 	model := ResolveModel(req.Model)
 
@@ -52,10 +53,32 @@ func (p *Provider) Judge(ctx context.Context, req judge.Request) (judge.Verdict,
 			"role": "user",
 			"content": fmt.Sprintf(
 				"You are a policy judge. Evaluate the following content against this criteria:\n\n"+
-					"Criteria: %s\n\nContent: %s\n\n"+
-					"Respond with ONLY a JSON object: {\"decision\": \"allow\" or \"deny\", \"reason\": \"brief explanation\"}",
+					"Criteria: %s\n\nContent: %s",
 				req.Prompt, req.Content),
 		}},
+		"response_format": map[string]any{
+			"type": "json_schema",
+			"json_schema": map[string]any{
+				"name":   "verdict",
+				"strict": true,
+				"schema": map[string]any{
+					"type": "object",
+					"properties": map[string]any{
+						"decision": map[string]any{
+							"type":        "string",
+							"enum":        []string{"allow", "deny"},
+							"description": "Whether to allow or deny the content.",
+						},
+						"reason": map[string]any{
+							"type":        "string",
+							"description": "Brief explanation for the decision.",
+						},
+					},
+					"required":             []string{"decision", "reason"},
+					"additionalProperties": false,
+				},
+			},
+		},
 	}
 
 	jsonBody, err := json.Marshal(body)
