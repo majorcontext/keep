@@ -8,6 +8,8 @@ import (
 
 const defaultMaxSize = 10_000
 
+var _ Provider = (*Cache)(nil)
+
 // Cache wraps a Provider with an in-memory verdict cache.
 // Identical requests (same model, prompt, content) return cached verdicts
 // without calling the underlying provider. Errors are not cached.
@@ -24,8 +26,14 @@ type CacheOption func(*Cache)
 
 // WithMaxSize sets the maximum number of cached verdicts.
 // When exceeded, the oldest entries are evicted. Default: 10,000.
+// Values less than 1 are clamped to 1.
 func WithMaxSize(n int) CacheOption {
-	return func(c *Cache) { c.maxSize = n }
+	return func(c *Cache) {
+		if n < 1 {
+			n = 1
+		}
+		c.maxSize = n
+	}
 }
 
 // NewCache creates a caching wrapper around a Provider.

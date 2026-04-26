@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/majorcontext/keep/judge"
 )
@@ -74,7 +75,8 @@ func (p *Provider) Judge(ctx context.Context, req judge.Request) (judge.Verdict,
 						"description": "Brief explanation for the decision.",
 					},
 				},
-				"required": []string{"decision", "reason"},
+				"required":             []string{"decision", "reason"},
+				"additionalProperties": false,
 			},
 		}},
 		"tool_choice": map[string]any{
@@ -150,7 +152,7 @@ func parseResponse(body []byte) (judge.Verdict, error) {
 	}
 
 	var d judge.Decision
-	switch verdict.Decision {
+	switch strings.ToLower(verdict.Decision) {
 	case "allow":
 		d = judge.Allow
 	case "deny":

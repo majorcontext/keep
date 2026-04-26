@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/majorcontext/keep/judge"
 )
@@ -47,8 +48,8 @@ func (p *Provider) Judge(ctx context.Context, req judge.Request) (judge.Verdict,
 	model := ResolveModel(req.Model)
 
 	body := map[string]any{
-		"model":      model,
-		"max_tokens": 256,
+		"model":                 model,
+		"max_completion_tokens": 256,
 		"messages": []map[string]any{{
 			"role": "user",
 			"content": fmt.Sprintf(
@@ -114,8 +115,10 @@ func (p *Provider) Judge(ctx context.Context, req judge.Request) (judge.Verdict,
 func parseResponse(body []byte) (judge.Verdict, error) {
 	var apiResp struct {
 		Choices []struct {
-			Message struct {
+			FinishReason string `json:"finish_reason"`
+			Message      struct {
 				Content string `json:"content"`
+				Refusal string `json:"refusal"`
 			} `json:"message"`
 		} `json:"choices"`
 		Usage struct {
@@ -131,16 +134,24 @@ func parseResponse(body []byte) (judge.Verdict, error) {
 		return judge.Verdict{}, fmt.Errorf("empty response from judge")
 	}
 
+	choice := apiResp.Choices[0]
+	if choice.FinishReason == "length" {
+		return judge.Verdict{}, fmt.Errorf("judge response truncated (finish_reason=length), increase max_completion_tokens")
+	}
+	if choice.Message.Refusal != "" {
+		return judge.Verdict{}, fmt.Errorf("judge model refused: %s", choice.Message.Refusal)
+	}
+
 	var verdict struct {
 		Decision string `json:"decision"`
 		Reason   string `json:"reason"`
 	}
-	if err := json.Unmarshal([]byte(apiResp.Choices[0].Message.Content), &verdict); err != nil {
+	if err := json.Unmarshal([]byte(choice.Message.Content), &verdict); err != nil {
 		return judge.Verdict{}, fmt.Errorf("parse verdict JSON: %w", err)
 	}
 
 	var d judge.Decision
-	switch verdict.Decision {
+	switch strings.ToLower(verdict.Decision) {
 	case "allow":
 		d = judge.Allow
 	case "deny":
