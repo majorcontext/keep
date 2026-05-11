@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-11
+
+### Added
+
+- **LLM-as-judge** — new `action: judge` rule type that sends matched content to an LLM for allow/deny evaluation
+  - Anthropic provider with forced tool use for structured output (`haiku`, `sonnet`, `opus` shortcuts)
+  - OpenAI provider with `json_schema` response format (`gpt-4o`, `gpt-4o-mini`, `o3` shortcuts)
+  - `judge` block in rules: `model`, `prompt`, `timeout`, `on_error` fields
+  - `judge` config block in gateway and relay for provider wiring (`provider`, `api_key_env`, `base_url`)
+- **Verdict cache** — in-memory cache for judge verdicts eliminates redundant LLM calls in multi-turn conversations
+  - Cache key: `sha256(model + prompt + content)` with null-byte separators
+  - Oldest-first eviction, default 10,000 entries, configurable via `judge.WithMaxSize(n)`
+  - `Cached` field propagated through `Verdict` → `JudgeResult` → `JudgeAudit` for audit trail visibility
+- `keep eval` command for measuring judge quality against labeled datasets
+- Judge verdict support in `keep test` fixtures
+- Vibe-check demo (`examples/judge-demo/`) — screens messages for passive-aggression, hostility, and profanity
+- `WithJudge(fn)` engine option for Go library users
+- Documentation for judge across all sections: writing-rules guide, rule-file reference, gateway/relay config, audit logging, Go library, README
+
 ## [0.3.0] - 2026-04-03
 
 ### Added
