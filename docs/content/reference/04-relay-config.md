@@ -19,6 +19,7 @@ The relay configuration file controls how `keep-mcp-relay` listens for MCP conne
 | `packs_dir` | `string` | No | `""` | Path to the directory containing starter pack files. |
 | `routes` | `list` | Yes | -- | One or more route definitions. Must not be empty. |
 | `log` | `object` | No | See below | Log format and output configuration. |
+| `judge` | `object` | No | `null` | LLM-as-judge provider configuration. Required for rules with `action: judge`. |
 
 ## routes
 
@@ -48,6 +49,18 @@ Exactly one of `upstream` or `command` must be set per route.
 |-------|------|----------|---------|-------------|
 | `format` | `string` | No | `"json"` | Log format. |
 | `output` | `string` | No | `"stdout"` | Output destination. A file path writes audit logs to that file. |
+
+## judge
+
+Configures the LLM provider used for rules with `action: judge`. If omitted, judge rules are skipped.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `provider` | `string` | Yes | -- | Judge provider: `"anthropic"` or `"openai"`. |
+| `api_key_env` | `string` | Yes | -- | Name of the environment variable containing the provider API key. |
+| `base_url` | `string` | No | Provider default | Override the provider API base URL. |
+
+Verdicts are cached in memory for the lifetime of the process. Identical content evaluated against the same prompt and model returns a cached result without calling the provider. The cache holds up to 10,000 entries with oldest-first eviction.
 
 ## Complete example
 

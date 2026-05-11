@@ -28,7 +28,7 @@ Each audit entry contains these fields:
 | `Decision` | The outcome: `allow`, `deny`, or `redact` |
 | `Rule` | The name of the rule that determined the decision |
 | `Message` | The deny message or rule annotation |
-| `RulesEvaluated` | Every rule checked, with match/no-match/skipped status |
+| `RulesEvaluated` | Every rule checked, with match/no-match/skipped status. Judge rules include verdict details. |
 | `ParamsSummary` | A truncated JSON snapshot of the call parameters |
 | `Enforced` | Whether the decision was actually applied |
 | `RedactSummary` | Paths and replacement values for redacted fields |
@@ -90,6 +90,53 @@ In audit-only mode:
 - CEL evaluation errors are treated as non-matches rather than triggering fail-closed behavior.
 
 > **Note:** CEL functions with side effects still execute in audit-only mode. `rateCount()` increments counters even when the decision is not enforced. This is a known limitation.
+
+## Judge audit fields
+
+Rules with `action: judge` add a `judge` object to their entry in `RulesEvaluated`:
+
+| Field | Description |
+|-------|-------------|
+| `model` | The model that evaluated the content |
+| `verdict` | `"allow"` or `"deny"` |
+| `reason` | The model's explanation for its decision |
+| `cached` | `true` if the verdict was returned from cache (omitted when `false`) |
+| `latency_ms` | Time in milliseconds for the judge call. Near zero for cache hits. |
+| `usage.input_tokens` | Tokens consumed by the judge prompt |
+| `usage.output_tokens` | Tokens consumed by the judge response |
+| `error` | Error message if the judge call failed (omitted on success) |
+
+Example audit entry for a denied judge rule:
+
+```json
+{
+  "Name": "vibe-check",
+  "Matched": true,
+  "Action": "judge",
+  "judge": {
+    "model": "claude-haiku-4-5-20251001",
+    "verdict": "deny",
+    "reason": "The message uses passive-aggressive language.",
+    "latency_ms": 842,
+    "usage": {"input_tokens": 156, "output_tokens": 38}
+  }
+}
+```
+
+On subsequent turns, the same content returns a cached verdict:
+
+```json
+{
+  "judge": {
+    "model": "claude-haiku-4-5-20251001",
+    "verdict": "deny",
+    "reason": "The message uses passive-aggressive language.",
+    "cached": true,
+    "latency_ms": 0,
+    "usage": {"input_tokens": 0, "output_tokens": 0}
+  }
+}
+```
 
 ## Operational use
 

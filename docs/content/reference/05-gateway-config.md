@@ -22,6 +22,7 @@ The gateway configuration file controls how `keep-llm-gateway` proxies LLM API t
 | `scope` | `string` | Yes | -- | Scope name matching a scope declared in your rule files. |
 | `decompose` | `object` | No | See below | Controls which message block types the gateway decomposes for evaluation. |
 | `log` | `object` | No | See below | Log format and output configuration. |
+| `judge` | `object` | No | `null` | LLM-as-judge provider configuration. Required for rules with `action: judge`. |
 
 ## decompose
 
@@ -44,6 +45,18 @@ See [LLM decomposition](../concepts/05-llm-decomposition.md) for how the gateway
 | `format` | `string` | No | `"json"` | Log format. |
 | `output` | `string` | No | `"stdout"` | Output destination. A file path writes audit logs to that file. |
 
+## judge
+
+Configures the LLM provider used for rules with `action: judge`. If omitted, judge rules are skipped.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `provider` | `string` | Yes | -- | Judge provider: `"anthropic"` or `"openai"`. |
+| `api_key_env` | `string` | Yes | -- | Name of the environment variable containing the provider API key. |
+| `base_url` | `string` | No | Provider default | Override the provider API base URL. |
+
+Verdicts are cached in memory for the lifetime of the process. Identical content evaluated against the same prompt and model returns a cached result without calling the provider. The cache holds up to 10,000 entries with oldest-first eviction.
+
 ## Complete example
 
 ```yaml
@@ -54,6 +67,9 @@ packs_dir: "./packs"
 provider: anthropic
 upstream: "https://api.anthropic.com"
 scope: anthropic-gateway
+judge:
+  provider: anthropic
+  api_key_env: "ANTHROPIC_API_KEY"
 
 decompose:
   tool_use: true
@@ -67,7 +83,7 @@ log:
   output: stdout
 ```
 
-This configuration proxies Anthropic API traffic on port 8080. The gateway decomposes tool-use and tool-result blocks for policy evaluation but skips plain text blocks. Audit events are written to stdout in JSON format.
+This configuration proxies Anthropic API traffic on port 8080. Judge rules use the Anthropic API with a key from the `ANTHROPIC_API_KEY` environment variable. The gateway decomposes tool-use and tool-result blocks for policy evaluation but skips plain text blocks. Audit events are written to stdout in JSON format.
 
 ## Related pages
 

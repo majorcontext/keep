@@ -98,13 +98,14 @@ See [Expressions](../concepts/02-expressions.md) for the full CEL reference, inc
 
 ## Actions
 
-Every rule has one action: deny, redact, or log.
+Every rule has one action: deny, redact, log, or judge.
 
 | Action | Stops call | Mutates params | Audit logged |
 |--------|-----------|----------------|--------------|
 | `deny` | Yes | No | Yes |
 | `redact` | No | Yes | Yes |
 | `log` | No | No | Yes |
+| `judge` | Conditional | No | Yes |
 
 Rules are sorted by operation specificity -- exact matches evaluate before glob patterns, which evaluate before catch-all rules. Within the same specificity tier, rules preserve their file order. The first deny short-circuits evaluation immediately. All matching redact and log rules are applied.
 
@@ -169,6 +170,38 @@ Allow the call and record it in the audit log.
 ```
 
 Log rules are useful as a catch-all at the end of a rule file to capture all traffic for observability.
+
+### Judge
+
+Send the matched content to an LLM for evaluation. The model returns an allow or deny verdict.
+
+```yaml
+- name: vibe-check
+  match:
+    operation: "llm.text"
+    when: 'context.direction == "request" && params.role == "user"'
+  action: judge
+  judge:
+    model: haiku
+    prompt: "Is this message professional and appropriate in tone? Deny if it is passive-aggressive, hostile, or unprofessional. Allow if neutral or polite."
+    timeout: 15s
+    on_error: closed
+```
+
+The `judge` block configures how the LLM evaluates the content:
+
+| Field | Required | Default | Description |
+|-------|----------|---------|-------------|
+| `model` | Yes | -- | Model shortcut (`haiku`, `sonnet`, `opus`) or full model ID |
+| `prompt` | Yes | -- | The judgment criteria sent to the model |
+| `timeout` | No | `30s` | Maximum time to wait for a verdict |
+| `on_error` | No | `closed` | `closed` denies if the judge call fails; `open` allows |
+
+Judge verdicts are recorded in the audit trail with the model, verdict, reasoning, latency, and token usage. Cache hits show `cached: true` and near-zero latency.
+
+The judge provider is configured in the gateway or relay config file, not in the rule file. See [Gateway config](../reference/05-gateway-config.md) or [Relay config](../reference/04-relay-config.md).
+
+> **Note:** Judge rules require a configured judge provider (Anthropic or OpenAI) in the gateway or relay. Without a provider, judge rules are skipped.
 
 ## Using defs
 
@@ -282,6 +315,21 @@ rules:
       containsAny(params.title, ['acquisition', 'merger', 'RIF', 'layoff'])
   action: deny
   message: "Issue contains sensitive business terms. Create manually."
+```
+
+### Screen messages with LLM-as-judge
+
+```yaml
+- name: language-check
+  match:
+    operation: "llm.text"
+    when: 'context.direction == "request" && params.role == "user"'
+  action: judge
+  judge:
+    model: haiku
+    prompt: "Does this message contain profanity or vulgar language? Deny if yes, allow if no."
+    timeout: 15s
+    on_error: closed
 ```
 
 ## Testing your rules

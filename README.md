@@ -206,6 +206,39 @@ The agent sets `ANTHROPIC_BASE_URL=http://localhost:8080` and uses Claude normal
 
 </details>
 
+<details>
+<summary><strong>LLM Gateway: Vibe check with LLM-as-judge</strong></summary>
+
+The gateway uses LLM-as-judge rules to screen messages for tone and language before they reach the model.
+
+**Polite request** -- both judges allow it through:
+
+```
+> Could you explain the difference between a mutex and a semaphore?
+✓ allow  language-check
+✓ allow  vibe-check
+```
+
+**Passive-aggressive message** -- caught by the vibe-check judge:
+
+```
+> Per my last email, I already explained this. Please advise.
+✗ deny   vibe-check
+```
+
+**Profanity** -- caught by the language-check judge before vibe-check fires:
+
+```
+> This damn API is such absolute crap, what idiot designed this?
+✗ deny   language-check
+```
+
+Judge verdicts appear in the audit trail with the model, reasoning, latency, and token usage. Repeated content in multi-turn conversations hits the verdict cache and returns near-instantly.
+
+**Try it:** `./examples/judge-demo/demo.sh` (requires an Anthropic API key)
+
+</details>
+
 ## Configuration
 
 Rule files are pure policy -- no transport details:
@@ -256,6 +289,8 @@ See the language specification in [docs/plans/2026-03-17-language-spec.md](docs/
 **LLM gateway:** Decomposes LLM message payloads into per-content-block calls. `llm.tool_result`, `llm.tool_use`, `llm.request`, `llm.response` -- each evaluated as a flat call. Bidirectional: filters both what the model sees and what the model wants to do.
 
 **Audit logging:** Every evaluation produces a structured JSON log entry -- timestamp, scope, operation, agent identity, rules evaluated, decision.
+
+**LLM-as-judge:** Rules with `action: judge` send matched content to an LLM (Anthropic or OpenAI) for evaluation. The model returns an allow or deny verdict based on a prompt you define in the rule. Verdicts are cached -- identical content is not re-evaluated across turns.
 
 ## Documentation
 

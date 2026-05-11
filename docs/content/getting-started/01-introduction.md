@@ -15,7 +15,7 @@ Every interaction flows through the same pattern:
 
 1. A structured **call** enters the engine — an operation name, parameters, and context
 2. The engine matches the call against **rules** grouped by **scope**
-3. Each rule produces a **decision**: allow, deny, or redact
+3. Each rule produces a **decision**: allow, deny, redact, or judge (LLM evaluation)
 
 A rule file defines a scope and its rules:
 

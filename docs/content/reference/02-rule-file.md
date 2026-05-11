@@ -29,9 +29,10 @@ A rule file is a YAML document that declares a scope and its rules. The engine l
 | `name` | `string` | Yes | — | Unique within scope. Must match `[a-z][a-z0-9-]*`, max 64 characters. Used in audit logs and denial responses. |
 | `description` | `string` | No | — | Human-readable explanation. |
 | `match` | `Match` | No | — | When this rule applies. If omitted, the rule matches all calls in the scope. |
-| `action` | `string` | Yes | — | `deny` — block the call. `log` — allow and record. `redact` — allow and mutate fields. |
+| `action` | `string` | Yes | — | `deny` — block the call. `log` — allow and record. `redact` — allow and mutate fields. `judge` — send to an LLM for evaluation. |
 | `message` | `string` | No | — | Returned to the caller on deny. Recommended for deny rules. |
 | `redact` | `RedactSpec` | Conditional | — | Required when `action` is `redact`. Defines what to redact and how. |
+| `judge` | `JudgeSpec` | Conditional | — | Required when `action` is `judge`. Configures the LLM evaluation. |
 
 ## Match block
 
@@ -69,6 +70,17 @@ Required when `action` is `redact`. Must have `secrets: true`, non-empty `patter
 |-------|------|----------|-------------|
 | `match` | `string` | Yes | RE2 regex pattern. Must not be empty. |
 | `replace` | `string` | Yes | Replacement string. Supports RE2 capture group references (`$1`, `${name}`, etc.). The entire match is replaced with the expanded value. |
+
+## Judge block
+
+Required when `action` is `judge`. Sends the matched content to an LLM for an allow/deny verdict.
+
+| Field | Type | Required | Default | Description |
+|-------|------|----------|---------|-------------|
+| `model` | `string` | Yes | — | Model shortcut or full model identifier. Anthropic shortcuts: `haiku`, `sonnet`, `opus`. OpenAI shortcuts: `gpt-4o`, `gpt-4o-mini`, `o3`. Full model IDs are passed through as-is. |
+| `prompt` | `string` | Yes | — | The judgment criteria. Sent to the model along with the matched content. |
+| `timeout` | `duration` | No | `"30s"` | Maximum time to wait for the judge response. Format: Go duration string (e.g., `"5s"`, `"15s"`, `"1m"`). |
+| `on_error` | `string` | No | `"closed"` | `closed` — deny the call if the judge request fails or times out. `open` — allow the call and skip the judge on error. |
 
 ## Defs
 
@@ -136,9 +148,10 @@ Def names and profile alias names must not use any of the following identifiers:
 1. Pack rules are evaluated before inline rules.
 2. Rules are evaluated in file order.
 3. First `deny` match short-circuits — the call is blocked immediately.
-4. All matching `redact` rules are applied in order (mutations accumulate).
-5. All matching `log` rules are recorded.
-6. If no rule denies, the call is allowed.
+4. Judge rules call the LLM provider. The verdict (allow or deny) determines the decision.
+5. All matching `redact` rules are applied in order (mutations accumulate).
+6. All matching `log` rules are recorded.
+7. If no rule denies, the call is allowed.
 
 ## Field paths
 

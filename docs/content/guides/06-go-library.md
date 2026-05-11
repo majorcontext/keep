@@ -45,6 +45,7 @@ engine, err := keep.Load("./rules",
 | `WithProfilesDir(dir)` | Load profile YAML files that define field aliases |
 | `WithPacksDir(dir)` | Load starter pack YAML files with reusable rules |
 | `WithForceEnforce()` | Override every scope's mode to `enforce` |
+| `WithJudge(fn)` | Register an LLM-as-judge function for rules with `action: judge` |
 
 ## Evaluate calls
 
@@ -125,6 +126,28 @@ fmt.Println(engine.Scopes()) // [anthropic-gateway linear-tools]
 ## Thread safety
 
 The engine is safe for concurrent use. Multiple goroutines can call `Evaluate` simultaneously. `Reload` acquires a write lock internally, so concurrent evaluations block briefly during a reload and resume with the new rules.
+
+## LLM-as-judge
+
+To use rules with `action: judge`, register a judge function when loading the engine. The `judge` package provides a cache wrapper and ready-made providers for Anthropic and OpenAI:
+
+```go
+import (
+    "github.com/majorcontext/keep/judge"
+    anthropicjudge "github.com/majorcontext/keep/judge/anthropic"
+)
+
+provider := anthropicjudge.New(os.Getenv("ANTHROPIC_API_KEY"))
+cached := judge.NewCache(provider)
+
+engine, err := keep.Load("./rules",
+    keep.WithJudge(cached.Judge),
+)
+```
+
+`judge.NewCache` wraps any judge provider with an in-memory verdict cache. Identical content evaluated against the same prompt and model returns a cached result without calling the provider. The cache holds up to 10,000 entries by default, configurable with `judge.WithMaxSize(n)`.
+
+Without `WithJudge`, rules with `action: judge` are skipped during evaluation.
 
 ## Complete example
 
