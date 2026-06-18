@@ -131,11 +131,36 @@ type Evaluator struct {
 	secrets       *secrets.Detector
 	caseSensitive bool
 	judgeFunc     JudgeHandler
+	requiresBody  bool // precomputed: any rule references params.body
 }
 
 // SetJudgeFunc sets the judge handler for this evaluator.
 func (ev *Evaluator) SetJudgeFunc(fn JudgeHandler) {
 	ev.judgeFunc = fn
+}
+
+// ParamBody is the params key under which the request body is exposed to rules
+// (params.body). It is the single source of truth shared by the call helpers
+// that populate the body and the analysis that detects references to it.
+const ParamBody = "body"
+
+// RequiresBody reports whether any compiled rule in this scope references the
+// request body (params.body). Callers can use this to decide whether the
+// (potentially expensive) request body needs to be buffered and supplied
+// before evaluation. The answer is fixed at compile time and precomputed in
+// NewEvaluator, so this is an O(1) lookup safe to call per request.
+func (ev *Evaluator) RequiresBody() bool {
+	return ev.requiresBody
+}
+
+// computeRequiresBody reports whether any compiled rule references params.body.
+func computeRequiresBody(rules []compiledRule) bool {
+	for _, cr := range rules {
+		if cr.program.ReferencesParam(ParamBody) {
+			return true
+		}
+	}
+	return false
 }
 
 // NewEvaluator creates an evaluator for a scope. Compiles all CEL expressions
@@ -201,6 +226,7 @@ func NewEvaluator(
 		scope:         scope,
 		secrets:       detector,
 		caseSensitive: caseSensitive,
+		requiresBody:  computeRequiresBody(compiled),
 	}, nil
 }
 

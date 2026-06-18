@@ -163,6 +163,24 @@ func (e *Engine) Evaluate(ctx context.Context, call Call, scope string) (EvalRes
 	return result, nil
 }
 
+// RequiresBody reports whether any rule in the given scope references the
+// request body (params.body). Gatekeepers can use this as a trigger signal to
+// decide whether the request body must be buffered before calling Evaluate.
+//
+// It fails safe: an unknown scope returns true (err toward buffering) rather
+// than silently false, so a misconfigured scope name never causes a body rule
+// to be skipped. Evaluate still returns an error for the unknown scope, so the
+// misconfiguration surfaces there.
+func (e *Engine) RequiresBody(scope string) bool {
+	e.mu.RLock()
+	ev, ok := e.evaluators[scope]
+	e.mu.RUnlock()
+	if !ok {
+		return true
+	}
+	return ev.RequiresBody()
+}
+
 // Scopes returns the sorted list of loaded scope names.
 func (e *Engine) Scopes() []string {
 	e.mu.RLock()

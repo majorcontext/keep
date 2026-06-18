@@ -70,6 +70,60 @@ A `Call` has three fields:
 
 The second argument to `Evaluate` is the scope name declared in your rule files. If the scope does not exist, `Evaluate` returns an error listing available scopes.
 
+## Convenience constructors
+
+For common gatekeeper shapes, helper constructors build the `Call` for you. They set `Operation` and `Params` but leave `Context.Scope` unset -- assign it from your deployment convention.
+
+| Helper | Use |
+|--------|-----|
+| `NewHTTPCall(method, host, path)` | An outbound HTTP request. Exposes `params.method`, `params.host`, `params.path`. |
+| `NewHTTPCallWithBody(method, host, path, body)` | Same, plus the decoded request body under `params.body`. |
+| `NewMCPCall(tool, params)` | An MCP tool call. `Operation` is the tool name; `params` is passed through. |
+
+> The built-in `keep-llm-gateway` does **not** use these -- it decomposes provider requests into semantic calls (`params.model`, `params.system`, `params.text`, ...). The HTTP helpers are for embedding Keep in your own HTTP proxy or middleware.
+
+### Inspecting the request body
+
+`NewHTTPCallWithBody` exposes the decoded body so rules can match on it:
+
+```yaml
+- name: block-gpt4
+  match:
+    when: "params.body.model == 'gpt-4'"
+  action: deny
+```
+
+`body` is typed `any`, so it accepts a JSON object (`map[string]any`), an array (`[]any`), or a scalar.
+
+Buffering and parsing a request body is not free, so only do it when a rule in the scope actually reads it. `Engine.RequiresBody(scope)` answers that from a compile-time scan of the scope's rules:
+
+```go
+func middleware(engine *keep.Engine, scope string) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        var body any // any JSON shape: object, array, or scalar
+        if engine.RequiresBody(scope) {
+            raw, err := io.ReadAll(r.Body)
+            if err != nil {
+                http.Error(w, "cannot read request body", http.StatusBadRequest)
+                return
+            }
+            r.Body = io.NopCloser(bytes.NewReader(raw)) // restore for the proxy
+            if len(raw) > 0 {
+                if err := json.Unmarshal(raw, &body); err != nil {
+                    http.Error(w, "invalid JSON body", http.StatusBadRequest)
+                    return
+                }
+            }
+        }
+        call := keep.NewHTTPCallWithBody(r.Method, r.Host, r.URL.Path, body)
+        call.Context.Scope = scope
+        // ... evaluate and act on the decision
+    }
+}
+```
+
+`RequiresBody` fails safe: it detects every idiomatic body reference (`params.body.x`, `params["body"]`, `has(params.body)`, comprehensions, the `in` operator), and for any unrecognized use of the `params` map -- or an unknown scope name -- it returns `true` so the body is buffered rather than silently skipped.
+
 ## Handle decisions
 
 `result.Decision` is one of three values:

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/cel-go/cel"
+	celast "github.com/google/cel-go/common/ast"
+	"github.com/google/cel-go/common/operators"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
@@ -277,6 +279,13 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 // Program is a compiled CEL expression ready for evaluation.
 type Program struct {
 	prog cel.Program
+	// paramRefs is the set of top-level fields referenced off the params
+	// input variable (e.g. "body", "headers"), computed once at compile time.
+	paramRefs map[string]bool
+	// paramsOpaque is set when the expression uses the params map in a way the
+	// syntactic walker cannot resolve to specific fields (see collectParamRefs).
+	// When true, ReferencesParam answers true for every field — failing safe.
+	paramsOpaque bool
 }
 
 // Compile parses and type-checks a CEL expression string.
@@ -290,7 +299,89 @@ func (e *Env) Compile(expr string) (*Program, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cel: program %q: %w", expr, err)
 	}
-	return &Program{prog: prog}, nil
+	refs, opaque := collectParamRefs(ast.NativeRep())
+	return &Program{prog: prog, paramRefs: refs, paramsOpaque: opaque}, nil
+}
+
+// ReferencesParam reports whether the compiled expression may read the given
+// field off the params input variable. It returns true for idiomatic dot- or
+// index-access (params.body, params["body"], including nested forms like
+// params.body.foo), and — failing safe — for every field when the expression
+// touches the params map opaquely (see collectParamRefs). The result is
+// computed at compile time, so this is a cheap lookup.
+func (p *Program) ReferencesParam(field string) bool {
+	if p == nil {
+		return false
+	}
+	return p.paramsOpaque || p.paramRefs[field]
+}
+
+// collectParamRefs walks a compiled AST and returns the set of top-level fields
+// read off the params input variable, plus an "opaque" flag. It recognizes both
+// dot-selection (params.body) and index access with a string literal
+// (params["body"]), including those nested inside macros (has, exists, map,
+// filter), the `in` operator, and ternaries — i.e. every idiomatic way a rule
+// reads a field.
+//
+// Because it is a purely syntactic matcher, it cannot resolve a field read
+// through a computed index key (params["bo"+"dy"]), the whole params map used as
+// a value (size(params), dyn(params).body), or params rebound to a comprehension
+// variable. Rather than silently report "no reference" for those — which would
+// let a fail-safe trigger (see Engine.RequiresBody) skip a field the rule
+// actually reads — it returns opaque=true whenever params is used in any form
+// other than a recognized field access. Callers then treat the expression as
+// potentially referencing any field.
+//
+// Detection: every occurrence of the bare params identifier is either consumed
+// by a recognized field access (a select on params, or an index of params with a
+// string-literal key) or it is not. If any occurrence is left unconsumed, params
+// escaped into an unresolvable position and opaque is set.
+//
+// Coupled to cel-go/common/ast (PostOrderVisit, SelectKind/CallKind, the index
+// operators); audit this walk when upgrading cel-go.
+func collectParamRefs(a *celast.AST) (refs map[string]bool, opaque bool) {
+	if a == nil {
+		return nil, false
+	}
+	refs = map[string]bool{}
+	var total, consumed int
+	celast.PostOrderVisit(a.Expr(), celast.NewExprVisitor(func(e celast.Expr) {
+		switch e.Kind() {
+		case celast.IdentKind:
+			if isParamsIdent(e) {
+				total++
+			}
+		case celast.SelectKind:
+			sel := e.AsSelect()
+			if isParamsIdent(sel.Operand()) {
+				refs[sel.FieldName()] = true
+				consumed++
+			}
+		case celast.CallKind:
+			call := e.AsCall()
+			if call.FunctionName() != operators.Index && call.FunctionName() != operators.OptIndex {
+				return
+			}
+			args := call.Args()
+			if len(args) != 2 || !isParamsIdent(args[0]) || args[1].Kind() != celast.LiteralKind {
+				return
+			}
+			if s, ok := args[1].AsLiteral().Value().(string); ok {
+				refs[s] = true
+				consumed++
+			}
+		}
+	}))
+	opaque = total > consumed
+	if len(refs) == 0 {
+		refs = nil
+	}
+	return refs, opaque
+}
+
+// isParamsIdent reports whether e is the bare params input identifier.
+func isParamsIdent(e celast.Expr) bool {
+	return e.Kind() == celast.IdentKind && e.AsIdent() == "params"
 }
 
 // Eval evaluates a compiled program against the given params and context.

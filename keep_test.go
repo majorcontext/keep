@@ -917,6 +917,102 @@ func TestRuleSet_DenyPrecedenceOverAllow(t *testing.T) {
 	}
 }
 
+func TestRequiresBody(t *testing.T) {
+	dir := writeRule(t, `
+scope: openai-gateway
+mode: enforce
+rules:
+  - name: block-gpt4
+    match:
+      operation: "*"
+      when: "params.body.model == 'gpt-4'"
+    action: deny
+    message: "gpt-4 is not allowed."
+`)
+	eng, err := keep.Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	defer eng.Close()
+
+	if !eng.RequiresBody("openai-gateway") {
+		t.Error("RequiresBody(openai-gateway) = false, want true")
+	}
+	// Unknown scope fails safe: returns true (err toward buffering) rather than
+	// silently skipping body buffering for a misconfigured scope name.
+	if !eng.RequiresBody("does-not-exist") {
+		t.Error("RequiresBody(does-not-exist) = false, want true (fail-safe)")
+	}
+}
+
+func TestRequiresBody_NoBodyRules(t *testing.T) {
+	dir := writeRule(t, `
+scope: header-only
+mode: enforce
+rules:
+  - name: block-delete
+    match:
+      operation: "DELETE *"
+    action: deny
+`)
+	eng, err := keep.Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	defer eng.Close()
+
+	if eng.RequiresBody("header-only") {
+		t.Error("RequiresBody(header-only) = true, want false")
+	}
+}
+
+// TestRequiresBody_EndToEnd exercises the full path: a scope that requires the
+// body, evaluated with a body supplied via NewHTTPCallWithBody.
+func TestRequiresBody_EndToEnd(t *testing.T) {
+	dir := writeRule(t, `
+scope: openai-gateway
+mode: enforce
+rules:
+  - name: block-gpt4
+    match:
+      when: "params.body.model == 'gpt-4'"
+    action: deny
+    message: "gpt-4 is not allowed."
+`)
+	eng, err := keep.Load(dir)
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+	defer eng.Close()
+
+	if !eng.RequiresBody("openai-gateway") {
+		t.Fatal("expected scope to require body")
+	}
+
+	// Matching body content => deny.
+	denyCall := keep.NewHTTPCallWithBody("POST", "api.openai.com", "/v1/chat/completions",
+		map[string]any{"model": "gpt-4"})
+	result, err := eng.Evaluate(context.Background(), denyCall, "openai-gateway")
+	if err != nil {
+		t.Fatalf("Evaluate() error: %v", err)
+	}
+	if result.Decision != keep.Deny {
+		t.Errorf("Decision = %q, want %q", result.Decision, keep.Deny)
+	}
+
+	// Non-matching body content => allow. Without this, a rule that denied
+	// regardless of body would still pass the deny assertion above.
+	allowCall := keep.NewHTTPCallWithBody("POST", "api.openai.com", "/v1/chat/completions",
+		map[string]any{"model": "gpt-3.5-turbo"})
+	result, err = eng.Evaluate(context.Background(), allowCall, "openai-gateway")
+	if err != nil {
+		t.Fatalf("Evaluate() error: %v", err)
+	}
+	if result.Decision != keep.Allow {
+		t.Errorf("Decision = %q, want %q", result.Decision, keep.Allow)
+	}
+}
+
 func TestRuleSet_EmptyCompiles(t *testing.T) {
 	rs := keep.NewRuleSet("empty", "enforce")
 	eng, err := rs.Compile()

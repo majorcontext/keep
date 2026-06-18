@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **Request body inspection helpers** for HTTP policy evaluation
+  - `NewHTTPCallWithBody(method, host, path, body)` constructs a `Call` with the decoded request body exposed under `params.body`, so rules can match on body contents (e.g. `params.body.model == 'gpt-4'` or `hasSecrets(params.body.prompt)`). `body` is typed `any`, accepting a JSON object, array, or scalar. The existing `NewHTTPCall` is unchanged.
+  - `Engine.RequiresBody(scope)` reports, from compile-time analysis of the scope's rules, whether any rule references `params.body`. Gatekeepers can use this as a trigger to decide whether to buffer and parse the request body before evaluating. It fails safe: every idiomatic body reference is detected, and an unrecognized use of the `params` map (or an unknown scope) returns `true` so the body is buffered rather than silently skipped.
+
 ## [0.4.0] - 2026-05-11
 
 ### Added

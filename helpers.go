@@ -41,6 +41,28 @@ func NewHTTPCall(method, host, path string) Call {
 	}
 }
 
+// NewHTTPCallWithBody constructs a Call for HTTP request policy evaluation,
+// including the parsed request body under params.body. It behaves exactly like
+// NewHTTPCall (method is uppercased, path is expected to include a leading
+// slash, Context.Scope is left unset) but additionally exposes the body to
+// rules that inspect it (e.g. `params.body.model == 'gpt-4'` or
+// `hasSecrets(params.body.prompt)`).
+//
+// body is the decoded request body and may be any JSON-shaped value: an object
+// (map[string]any), an array ([]any), or a scalar. It is stored as-is, so a nil
+// body still sets params.body (to nil). With a nil body, content-inspection
+// rules such as params.body.model == 'gpt-4' will not match, because CEL treats
+// the nil navigation as a missing value and the engine resolves that to false;
+// has(params.body) is nonetheless always true for calls built with this helper,
+// so test for a populated body with params.body != null instead. Use
+// Engine.RequiresBody to decide whether buffering and parsing the body is
+// worthwhile before calling this.
+func NewHTTPCallWithBody(method, host, path string, body any) Call {
+	call := NewHTTPCall(method, host, path)
+	call.Params[engine.ParamBody] = body
+	return call
+}
+
 // NewMCPCall constructs a Call for MCP tool-use policy evaluation.
 // The operation is the tool name as-is. Params are passed through directly (may be nil).
 // Context.Scope is not set — callers should assign it based on their deployment convention.
