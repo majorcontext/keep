@@ -100,11 +100,20 @@ Buffering and parsing a request body is not free, so only do it when a rule in t
 ```go
 func middleware(engine *keep.Engine, scope string) http.HandlerFunc {
     return func(w http.ResponseWriter, r *http.Request) {
-        var body map[string]any
+        var body any // any JSON shape: object, array, or scalar
         if engine.RequiresBody(scope) {
-            raw, _ := io.ReadAll(r.Body)
+            raw, err := io.ReadAll(r.Body)
+            if err != nil {
+                http.Error(w, "cannot read request body", http.StatusBadRequest)
+                return
+            }
             r.Body = io.NopCloser(bytes.NewReader(raw)) // restore for the proxy
-            _ = json.Unmarshal(raw, &body)
+            if len(raw) > 0 {
+                if err := json.Unmarshal(raw, &body); err != nil {
+                    http.Error(w, "invalid JSON body", http.StatusBadRequest)
+                    return
+                }
+            }
         }
         call := keep.NewHTTPCallWithBody(r.Method, r.Host, r.URL.Path, body)
         call.Context.Scope = scope

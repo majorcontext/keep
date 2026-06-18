@@ -71,6 +71,41 @@ func TestReferencesParam_MultipleFields(t *testing.T) {
 	}
 }
 
+// TestParamsBodyNilSemantics pins the CEL runtime behavior that
+// NewHTTPCallWithBody's docstring relies on: a nil body is stored under the
+// "body" key, so has(params.body) is true while params.body != null is false.
+// This guards the documented contract against a cel-go change to nil-valued map
+// key handling.
+func TestParamsBodyNilSemantics(t *testing.T) {
+	env := mustNewEnv(t)
+
+	withNil := map[string]any{"body": nil}                          // NewHTTPCallWithBody(nil)
+	withVal := map[string]any{"body": map[string]any{"model": "x"}} // populated body
+	absent := map[string]any{}                                      // NewHTTPCall (no body key)
+
+	tests := []struct {
+		expr   string
+		params map[string]any
+		want   bool
+	}{
+		{"has(params.body)", withNil, true},
+		{"has(params.body)", absent, false},
+		{"params.body != null", withNil, false},
+		{"params.body != null", withVal, true},
+		{"params.body != null", absent, false},
+	}
+	for _, tt := range tests {
+		prog := mustCompile(t, env, tt.expr)
+		got, err := prog.Eval(tt.params, nil)
+		if err != nil {
+			t.Fatalf("Eval(%q, %v) error: %v", tt.expr, tt.params, err)
+		}
+		if got != tt.want {
+			t.Errorf("Eval(%q, %v) = %v, want %v", tt.expr, tt.params, got, tt.want)
+		}
+	}
+}
+
 func TestReferencesParam_NilProgram(t *testing.T) {
 	// A nil *Program must not panic and reports no references. This matters
 	// because a rule with no when clause has a nil compiled program.

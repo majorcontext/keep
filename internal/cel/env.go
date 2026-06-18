@@ -348,7 +348,7 @@ func collectParamRefs(a *celast.AST) (refs map[string]bool, opaque bool) {
 	celast.PostOrderVisit(a.Expr(), celast.NewExprVisitor(func(e celast.Expr) {
 		switch e.Kind() {
 		case celast.IdentKind:
-			if e.AsIdent() == "params" {
+			if isParamsIdent(e) {
 				total++
 			}
 		case celast.SelectKind:
