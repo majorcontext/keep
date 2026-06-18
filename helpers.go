@@ -53,8 +53,9 @@ func NewHTTPCall(method, host, path string) Call {
 // body still sets params.body (to nil). With a nil body, content-inspection
 // rules such as params.body.model == 'gpt-4' will not match, because CEL treats
 // the nil navigation as a missing value and the engine resolves that to false;
-// has(params.body) is nonetheless always true for calls built with this helper.
-// Use Engine.RequiresBody to decide whether buffering and parsing the body is
+// has(params.body) is nonetheless always true for calls built with this helper,
+// so test for a populated body with params.body != null instead. Use
+// Engine.RequiresBody to decide whether buffering and parsing the body is
 // worthwhile before calling this.
 func NewHTTPCallWithBody(method, host, path string, body any) Call {
 	call := NewHTTPCall(method, host, path)
