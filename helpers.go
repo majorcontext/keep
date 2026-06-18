@@ -50,11 +50,13 @@ func NewHTTPCall(method, host, path string) Call {
 //
 // body is the decoded request body and may be any JSON-shaped value: an object
 // (map[string]any), an array ([]any), or a scalar. It is stored as-is, so a nil
-// body still sets params.body (to nil). Use Engine.RequiresBody to decide
-// whether buffering and parsing the body is worthwhile before calling this.
+// body still sets params.body (to nil) — meaning has(params.body) is always
+// true for calls built with this helper; test content with params.body != null
+// or size(params.body) instead. Use Engine.RequiresBody to decide whether
+// buffering and parsing the body is worthwhile before calling this.
 func NewHTTPCallWithBody(method, host, path string, body any) Call {
 	call := NewHTTPCall(method, host, path)
-	call.Params["body"] = body
+	call.Params[engine.ParamBody] = body
 	return call
 }
 

@@ -26,7 +26,13 @@ func TestReferencesParam(t *testing.T) {
 		{"different field requested", "params.body == 'x'", "headers", false},
 		{"no params at all", "context.agent_id == 'a'", "body", false},
 		{"field named after body substr", "params.bodyguard == 'x'", "body", false},
-		{"dynamic index not literal", "params[params.method] == 'x'", "body", false},
+		// Opaque uses of the params map cannot be resolved to a field, so
+		// detection fails SAFE: ReferencesParam answers true for every field.
+		{"dynamic index key", "params[params.method] == 'x'", "body", true},
+		{"computed string index key", `params["bo" + "dy"] == 'x'`, "body", true},
+		{"whole-map op", "size(params) > 0", "body", true},
+		{"params wrapped in dyn", "dyn(params).body == 'x'", "body", true},
+		{"opaque use alongside specific field", "params.a == 'x' && size(params) > 0", "body", true},
 	}
 
 	for _, tt := range tests {
@@ -36,6 +42,18 @@ func TestReferencesParam(t *testing.T) {
 				t.Errorf("ReferencesParam(%q) on %q = %v, want %v", tt.field, tt.expr, got, tt.want)
 			}
 		})
+	}
+}
+
+// TestReferencesParam_FailSafeDoesNotOverTrigger verifies that recognized
+// single-field access does NOT mark the program opaque: a rule that only reads
+// params.method must not report a reference to params.body (which would force a
+// gatekeeper to buffer the body for every method-only rule).
+func TestReferencesParam_FailSafeDoesNotOverTrigger(t *testing.T) {
+	env := mustNewEnv(t)
+	prog := mustCompile(t, env, "params.method == 'POST' && params.host == 'api.example.com'")
+	if prog.ReferencesParam("body") {
+		t.Error("ReferencesParam(\"body\") = true for a method/host-only rule, want false")
 	}
 }
 

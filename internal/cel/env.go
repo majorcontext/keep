@@ -282,6 +282,10 @@ type Program struct {
 	// paramRefs is the set of top-level fields referenced off the params
 	// input variable (e.g. "body", "headers"), computed once at compile time.
 	paramRefs map[string]bool
+	// paramsOpaque is set when the expression uses the params map in a way the
+	// syntactic walker cannot resolve to specific fields (see collectParamRefs).
+	// When true, ReferencesParam answers true for every field — failing safe.
+	paramsOpaque bool
 }
 
 // Compile parses and type-checks a CEL expression string.
@@ -295,50 +299,63 @@ func (e *Env) Compile(expr string) (*Program, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cel: program %q: %w", expr, err)
 	}
-	return &Program{prog: prog, paramRefs: collectParamRefs(ast.NativeRep())}, nil
+	refs, opaque := collectParamRefs(ast.NativeRep())
+	return &Program{prog: prog, paramRefs: refs, paramsOpaque: opaque}, nil
 }
 
-// ReferencesParam reports whether the compiled expression reads the given
-// field off the params input variable, via either dot-selection (params.body)
-// or index access (params["body"]). The result is computed at compile time, so
-// this is a cheap lookup. Nested access such as params.body.foo or
-// params.body[0] also counts as a reference to "body".
+// ReferencesParam reports whether the compiled expression may read the given
+// field off the params input variable. It returns true for idiomatic dot- or
+// index-access (params.body, params["body"], including nested forms like
+// params.body.foo), and — failing safe — for every field when the expression
+// touches the params map opaquely (see collectParamRefs). The result is
+// computed at compile time, so this is a cheap lookup.
 func (p *Program) ReferencesParam(field string) bool {
 	if p == nil {
 		return false
 	}
-	return p.paramRefs[field]
+	return p.paramsOpaque || p.paramRefs[field]
 }
 
 // collectParamRefs walks a compiled AST and returns the set of top-level fields
-// read off the params input variable. It recognizes both dot-selection
-// (params.body) and index access with a string literal (params["body"]),
-// including those nested inside macros (has, exists, map, filter), the `in`
-// operator, and ternaries — i.e. every idiomatic way a rule reads a field.
-// Returns nil when no params fields are referenced.
+// read off the params input variable, plus an "opaque" flag. It recognizes both
+// dot-selection (params.body) and index access with a string literal
+// (params["body"]), including those nested inside macros (has, exists, map,
+// filter), the `in` operator, and ternaries — i.e. every idiomatic way a rule
+// reads a field.
 //
-// This is a purely syntactic matcher, so it does NOT see fields read through
-// non-idiomatic forms: a computed index key (params["bo"+"dy"]), the whole
-// params map used as a value (size(params), dyn(params).body), or a field
-// reached after rebinding params to a comprehension variable. Such expressions
-// report no reference even though they read the field. Callers that use the
-// result as a fail-safe trigger (see Engine.RequiresBody) should therefore
-// steer rule authors toward the idiomatic params.<field> / params["<field>"]
-// access patterns.
+// Because it is a purely syntactic matcher, it cannot resolve a field read
+// through a computed index key (params["bo"+"dy"]), the whole params map used as
+// a value (size(params), dyn(params).body), or params rebound to a comprehension
+// variable. Rather than silently report "no reference" for those — which would
+// let a fail-safe trigger (see Engine.RequiresBody) skip a field the rule
+// actually reads — it returns opaque=true whenever params is used in any form
+// other than a recognized field access. Callers then treat the expression as
+// potentially referencing any field.
+//
+// Detection: every occurrence of the bare params identifier is either consumed
+// by a recognized field access (a select on params, or an index of params with a
+// string-literal key) or it is not. If any occurrence is left unconsumed, params
+// escaped into an unresolvable position and opaque is set.
 //
 // Coupled to cel-go/common/ast (PostOrderVisit, SelectKind/CallKind, the index
 // operators); audit this walk when upgrading cel-go.
-func collectParamRefs(a *celast.AST) map[string]bool {
+func collectParamRefs(a *celast.AST) (refs map[string]bool, opaque bool) {
 	if a == nil {
-		return nil
+		return nil, false
 	}
-	refs := map[string]bool{}
+	refs = map[string]bool{}
+	var total, consumed int
 	celast.PostOrderVisit(a.Expr(), celast.NewExprVisitor(func(e celast.Expr) {
 		switch e.Kind() {
+		case celast.IdentKind:
+			if e.AsIdent() == "params" {
+				total++
+			}
 		case celast.SelectKind:
 			sel := e.AsSelect()
 			if isParamsIdent(sel.Operand()) {
 				refs[sel.FieldName()] = true
+				consumed++
 			}
 		case celast.CallKind:
 			call := e.AsCall()
@@ -351,13 +368,15 @@ func collectParamRefs(a *celast.AST) map[string]bool {
 			}
 			if s, ok := args[1].AsLiteral().Value().(string); ok {
 				refs[s] = true
+				consumed++
 			}
 		}
 	}))
+	opaque = total > consumed
 	if len(refs) == 0 {
-		return nil
+		refs = nil
 	}
-	return refs
+	return refs, opaque
 }
 
 // isParamsIdent reports whether e is the bare params input identifier.

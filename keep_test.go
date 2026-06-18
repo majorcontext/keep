@@ -938,9 +938,10 @@ rules:
 	if !eng.RequiresBody("openai-gateway") {
 		t.Error("RequiresBody(openai-gateway) = false, want true")
 	}
-	// Unknown scope returns false rather than erroring.
-	if eng.RequiresBody("does-not-exist") {
-		t.Error("RequiresBody(does-not-exist) = true, want false")
+	// Unknown scope fails safe: returns true (err toward buffering) rather than
+	// silently skipping body buffering for a misconfigured scope name.
+	if !eng.RequiresBody("does-not-exist") {
+		t.Error("RequiresBody(does-not-exist) = false, want true (fail-safe)")
 	}
 }
 

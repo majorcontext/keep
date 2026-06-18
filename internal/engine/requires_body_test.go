@@ -55,6 +55,14 @@ func TestEvaluator_RequiresBody(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			name: "opaque params use fails safe",
+			rules: []config.Rule{
+				{Name: "method", Action: config.ActionDeny, Match: config.Match{When: "params.method == 'DELETE'"}},
+				{Name: "whole-map", Action: config.ActionDeny, Match: config.Match{When: "size(params) > 20"}},
+			},
+			want: true,
+		},
 	}
 
 	for _, tt := range tests {

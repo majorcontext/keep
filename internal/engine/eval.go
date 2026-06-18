@@ -138,13 +138,18 @@ func (ev *Evaluator) SetJudgeFunc(fn JudgeHandler) {
 	ev.judgeFunc = fn
 }
 
+// ParamBody is the params key under which the request body is exposed to rules
+// (params.body). It is the single source of truth shared by the call helpers
+// that populate the body and the analysis that detects references to it.
+const ParamBody = "body"
+
 // RequiresBody reports whether any compiled rule in this scope references the
 // request body (params.body). Callers can use this to decide whether the
 // (potentially expensive) request body needs to be buffered and supplied
 // before evaluation. The answer is fixed at compile time.
 func (ev *Evaluator) RequiresBody() bool {
 	for _, cr := range ev.rules {
-		if cr.program.ReferencesParam("body") {
+		if cr.program.ReferencesParam(ParamBody) {
 			return true
 		}
 	}
