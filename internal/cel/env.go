@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"github.com/google/cel-go/cel"
+	celast "github.com/google/cel-go/common/ast"
+	"github.com/google/cel-go/common/operators"
 	"github.com/google/cel-go/common/types"
 	"github.com/google/cel-go/common/types/ref"
 	"github.com/google/cel-go/common/types/traits"
@@ -277,6 +279,9 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 // Program is a compiled CEL expression ready for evaluation.
 type Program struct {
 	prog cel.Program
+	// paramRefs is the set of top-level fields referenced off the params
+	// input variable (e.g. "body", "headers"), computed once at compile time.
+	paramRefs map[string]bool
 }
 
 // Compile parses and type-checks a CEL expression string.
@@ -290,7 +295,60 @@ func (e *Env) Compile(expr string) (*Program, error) {
 	if err != nil {
 		return nil, fmt.Errorf("cel: program %q: %w", expr, err)
 	}
-	return &Program{prog: prog}, nil
+	return &Program{prog: prog, paramRefs: collectParamRefs(ast.NativeRep())}, nil
+}
+
+// ReferencesParam reports whether the compiled expression reads the given
+// field off the params input variable, via either dot-selection (params.body)
+// or index access (params["body"]). The result is computed at compile time, so
+// this is a cheap lookup. Nested access such as params.body.foo or
+// params.body[0] also counts as a reference to "body".
+func (p *Program) ReferencesParam(field string) bool {
+	if p == nil {
+		return false
+	}
+	return p.paramRefs[field]
+}
+
+// collectParamRefs walks a compiled AST and returns the set of top-level fields
+// read off the params input variable. It recognizes both dot-selection
+// (params.body) and index access with a string literal (params["body"]).
+// Returns nil when no params fields are referenced.
+func collectParamRefs(a *celast.AST) map[string]bool {
+	if a == nil {
+		return nil
+	}
+	refs := map[string]bool{}
+	celast.PostOrderVisit(a.Expr(), celast.NewExprVisitor(func(e celast.Expr) {
+		switch e.Kind() {
+		case celast.SelectKind:
+			sel := e.AsSelect()
+			if isParamsIdent(sel.Operand()) {
+				refs[sel.FieldName()] = true
+			}
+		case celast.CallKind:
+			call := e.AsCall()
+			if call.FunctionName() != operators.Index && call.FunctionName() != operators.OptIndex {
+				return
+			}
+			args := call.Args()
+			if len(args) != 2 || !isParamsIdent(args[0]) || args[1].Kind() != celast.LiteralKind {
+				return
+			}
+			if s, ok := args[1].AsLiteral().Value().(string); ok {
+				refs[s] = true
+			}
+		}
+	}))
+	if len(refs) == 0 {
+		return nil
+	}
+	return refs
+}
+
+// isParamsIdent reports whether e is the bare params input identifier.
+func isParamsIdent(e celast.Expr) bool {
+	return e.Kind() == celast.IdentKind && e.AsIdent() == "params"
 }
 
 // Eval evaluates a compiled program against the given params and context.

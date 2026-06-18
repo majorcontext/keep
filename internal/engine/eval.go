@@ -138,6 +138,19 @@ func (ev *Evaluator) SetJudgeFunc(fn JudgeHandler) {
 	ev.judgeFunc = fn
 }
 
+// RequiresBody reports whether any compiled rule in this scope references the
+// request body (params.body). Callers can use this to decide whether the
+// (potentially expensive) request body needs to be buffered and supplied
+// before evaluation. The answer is fixed at compile time.
+func (ev *Evaluator) RequiresBody() bool {
+	for _, cr := range ev.rules {
+		if cr.program.ReferencesParam("body") {
+			return true
+		}
+	}
+	return false
+}
+
 // NewEvaluator creates an evaluator for a scope. Compiles all CEL expressions
 // and redact patterns at creation time. Returns an error if any expression
 // fails to compile.

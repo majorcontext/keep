@@ -41,6 +41,18 @@ func NewHTTPCall(method, host, path string) Call {
 	}
 }
 
+// NewHTTPCallWithBody constructs a Call for HTTP request policy evaluation,
+// including the parsed request body under params.body. It behaves exactly like
+// NewHTTPCall but additionally exposes the body to rules that inspect it (e.g.
+// `params.body.model == 'gpt-4'` or `hasSecrets(params.body.prompt)`).
+// The body is set as-is, including a nil body. Use Engine.RequiresBody to decide
+// whether buffering and parsing the body is worthwhile before calling this.
+func NewHTTPCallWithBody(method, host, path string, body map[string]any) Call {
+	call := NewHTTPCall(method, host, path)
+	call.Params["body"] = body
+	return call
+}
+
 // NewMCPCall constructs a Call for MCP tool-use policy evaluation.
 // The operation is the tool name as-is. Params are passed through directly (may be nil).
 // Context.Scope is not set — callers should assign it based on their deployment convention.

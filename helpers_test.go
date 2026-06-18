@@ -37,6 +37,44 @@ func TestNewHTTPCallMethodUppercased(t *testing.T) {
 	}
 }
 
+func TestNewHTTPCallWithBody(t *testing.T) {
+	body := map[string]any{"model": "gpt-4", "stream": true}
+	call := NewHTTPCallWithBody("post", "api.openai.com", "/v1/chat/completions", body)
+
+	// Behaves like NewHTTPCall for the operation and base params.
+	if call.Operation != "POST api.openai.com/v1/chat/completions" {
+		t.Errorf("Operation = %q, want %q", call.Operation, "POST api.openai.com/v1/chat/completions")
+	}
+	if call.Params["method"] != "POST" {
+		t.Errorf("Params[method] = %v, want %q", call.Params["method"], "POST")
+	}
+	if call.Params["host"] != "api.openai.com" {
+		t.Errorf("Params[host] = %v, want %q", call.Params["host"], "api.openai.com")
+	}
+	if call.Context.Timestamp.IsZero() {
+		t.Error("Timestamp should not be zero")
+	}
+
+	// Body is exposed under params.body.
+	got, ok := call.Params["body"].(map[string]any)
+	if !ok {
+		t.Fatalf("Params[body] = %T, want map[string]any", call.Params["body"])
+	}
+	if got["model"] != "gpt-4" {
+		t.Errorf("Params[body][model] = %v, want %q", got["model"], "gpt-4")
+	}
+}
+
+func TestNewHTTPCallWithBody_NilBody(t *testing.T) {
+	call := NewHTTPCallWithBody("GET", "example.com", "/", nil)
+	if _, present := call.Params["body"]; !present {
+		t.Error("Params[body] key should be present even for a nil body")
+	}
+	if body, _ := call.Params["body"].(map[string]any); body != nil {
+		t.Errorf("Params[body] = %v, want a nil map", body)
+	}
+}
+
 func TestNewMCPCall(t *testing.T) {
 	params := map[string]any{"id": "123"}
 	call := NewMCPCall("delete_issue", params)
