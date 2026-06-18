@@ -312,8 +312,22 @@ func (p *Program) ReferencesParam(field string) bool {
 
 // collectParamRefs walks a compiled AST and returns the set of top-level fields
 // read off the params input variable. It recognizes both dot-selection
-// (params.body) and index access with a string literal (params["body"]).
+// (params.body) and index access with a string literal (params["body"]),
+// including those nested inside macros (has, exists, map, filter), the `in`
+// operator, and ternaries — i.e. every idiomatic way a rule reads a field.
 // Returns nil when no params fields are referenced.
+//
+// This is a purely syntactic matcher, so it does NOT see fields read through
+// non-idiomatic forms: a computed index key (params["bo"+"dy"]), the whole
+// params map used as a value (size(params), dyn(params).body), or a field
+// reached after rebinding params to a comprehension variable. Such expressions
+// report no reference even though they read the field. Callers that use the
+// result as a fail-safe trigger (see Engine.RequiresBody) should therefore
+// steer rule authors toward the idiomatic params.<field> / params["<field>"]
+// access patterns.
+//
+// Coupled to cel-go/common/ast (PostOrderVisit, SelectKind/CallKind, the index
+// operators); audit this walk when upgrading cel-go.
 func collectParamRefs(a *celast.AST) map[string]bool {
 	if a == nil {
 		return nil

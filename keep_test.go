@@ -988,14 +988,27 @@ rules:
 		t.Fatal("expected scope to require body")
 	}
 
-	call := keep.NewHTTPCallWithBody("POST", "api.openai.com", "/v1/chat/completions",
+	// Matching body content => deny.
+	denyCall := keep.NewHTTPCallWithBody("POST", "api.openai.com", "/v1/chat/completions",
 		map[string]any{"model": "gpt-4"})
-	result, err := eng.Evaluate(context.Background(), call, "openai-gateway")
+	result, err := eng.Evaluate(context.Background(), denyCall, "openai-gateway")
 	if err != nil {
 		t.Fatalf("Evaluate() error: %v", err)
 	}
 	if result.Decision != keep.Deny {
 		t.Errorf("Decision = %q, want %q", result.Decision, keep.Deny)
+	}
+
+	// Non-matching body content => allow. Without this, a rule that denied
+	// regardless of body would still pass the deny assertion above.
+	allowCall := keep.NewHTTPCallWithBody("POST", "api.openai.com", "/v1/chat/completions",
+		map[string]any{"model": "gpt-3.5-turbo"})
+	result, err = eng.Evaluate(context.Background(), allowCall, "openai-gateway")
+	if err != nil {
+		t.Fatalf("Evaluate() error: %v", err)
+	}
+	if result.Decision != keep.Allow {
+		t.Errorf("Decision = %q, want %q", result.Decision, keep.Allow)
 	}
 }
 

@@ -70,8 +70,24 @@ func TestNewHTTPCallWithBody_NilBody(t *testing.T) {
 	if _, present := call.Params["body"]; !present {
 		t.Error("Params[body] key should be present even for a nil body")
 	}
-	if body, _ := call.Params["body"].(map[string]any); body != nil {
-		t.Errorf("Params[body] = %v, want a nil map", body)
+	if call.Params["body"] != nil {
+		t.Errorf("Params[body] = %v, want nil", call.Params["body"])
+	}
+}
+
+// TestNewHTTPCallWithBody_NonObjectBody verifies the helper accepts bodies that
+// are not JSON objects — a top-level array (e.g. a batch request) or a scalar —
+// since `body` is typed `any`, not `map[string]any`.
+func TestNewHTTPCallWithBody_NonObjectBody(t *testing.T) {
+	arr := []any{map[string]any{"model": "gpt-4"}, map[string]any{"model": "gpt-3.5"}}
+	call := NewHTTPCallWithBody("POST", "api.openai.com", "/v1/batch", arr)
+
+	got, ok := call.Params["body"].([]any)
+	if !ok {
+		t.Fatalf("Params[body] = %T, want []any", call.Params["body"])
+	}
+	if len(got) != 2 {
+		t.Errorf("len(Params[body]) = %d, want 2", len(got))
 	}
 }
 

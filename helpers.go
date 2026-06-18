@@ -43,11 +43,16 @@ func NewHTTPCall(method, host, path string) Call {
 
 // NewHTTPCallWithBody constructs a Call for HTTP request policy evaluation,
 // including the parsed request body under params.body. It behaves exactly like
-// NewHTTPCall but additionally exposes the body to rules that inspect it (e.g.
-// `params.body.model == 'gpt-4'` or `hasSecrets(params.body.prompt)`).
-// The body is set as-is, including a nil body. Use Engine.RequiresBody to decide
+// NewHTTPCall (method is uppercased, path is expected to include a leading
+// slash, Context.Scope is left unset) but additionally exposes the body to
+// rules that inspect it (e.g. `params.body.model == 'gpt-4'` or
+// `hasSecrets(params.body.prompt)`).
+//
+// body is the decoded request body and may be any JSON-shaped value: an object
+// (map[string]any), an array ([]any), or a scalar. It is stored as-is, so a nil
+// body still sets params.body (to nil). Use Engine.RequiresBody to decide
 // whether buffering and parsing the body is worthwhile before calling this.
-func NewHTTPCallWithBody(method, host, path string, body map[string]any) Call {
+func NewHTTPCallWithBody(method, host, path string, body any) Call {
 	call := NewHTTPCall(method, host, path)
 	call.Params["body"] = body
 	return call
