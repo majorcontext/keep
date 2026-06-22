@@ -149,3 +149,87 @@ func TestHasSecrets_FieldScoped(t *testing.T) {
 		t.Error("hasSecrets(params.secret_field) should return true when secret_field has a secret")
 	}
 }
+
+// --- whole-body (map/list) hasSecrets overloads ---
+
+func newSecretEnv(t *testing.T) *keepcel.Env {
+	t.Helper()
+	det, err := secrets.NewDetector()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := keepcel.NewEnv(keepcel.WithSecretDetector(det))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return env
+}
+
+// evalHasSecrets compiles expr through the same rewrite the engine applies
+// (hasSecrets(params.X) -> hasSecrets(params.X, _originalParams.X)) and evaluates
+// it with originalParams == params, matching the production eval path.
+func evalHasSecrets(t *testing.T, env *keepcel.Env, expr string, params map[string]any) bool {
+	t.Helper()
+	rewritten := keepcel.InjectOriginalParams(expr)
+	prog, err := env.Compile(rewritten)
+	if err != nil {
+		t.Fatalf("Compile(%q) error: %v", rewritten, err)
+	}
+	got, err := prog.Eval(params, nil, params)
+	if err != nil {
+		t.Fatalf("Eval() error: %v", err)
+	}
+	return got
+}
+
+func TestHasSecrets_WholeBodyMap_True(t *testing.T) {
+	env := newSecretEnv(t)
+	params := map[string]any{"body": map[string]any{
+		"name":  "release v1",
+		"token": "AKIAIOSFODNN7REALKEY",
+	}}
+	if !evalHasSecrets(t, env, "hasSecrets(params.body)", params) {
+		t.Error("hasSecrets(params.body) should return true when a leaf carries a secret")
+	}
+}
+
+func TestHasSecrets_WholeBodyMap_False(t *testing.T) {
+	env := newSecretEnv(t)
+	params := map[string]any{"body": map[string]any{
+		"name": "release v1",
+		"note": "nothing secret here",
+	}}
+	if evalHasSecrets(t, env, "hasSecrets(params.body)", params) {
+		t.Error("hasSecrets(params.body) should return false for a clean object body")
+	}
+}
+
+func TestHasSecrets_WholeBodyNested_True(t *testing.T) {
+	env := newSecretEnv(t)
+	params := map[string]any{"body": map[string]any{
+		"meta": map[string]any{
+			"creds": map[string]any{"aws": "AKIAIOSFODNN7REALKEY"},
+		},
+	}}
+	if !evalHasSecrets(t, env, "hasSecrets(params.body)", params) {
+		t.Error("hasSecrets(params.body) should recurse into nested objects")
+	}
+}
+
+func TestHasSecrets_WholeBodyList_True(t *testing.T) {
+	env := newSecretEnv(t)
+	params := map[string]any{"body": map[string]any{
+		"items": []any{"safe", "AKIAIOSFODNN7REALKEY"},
+	}}
+	if !evalHasSecrets(t, env, "hasSecrets(params.body)", params) {
+		t.Error("hasSecrets(params.body) should scan list elements")
+	}
+}
+
+func TestHasSecrets_WholeBodyList_False(t *testing.T) {
+	env := newSecretEnv(t)
+	params := map[string]any{"body": []any{"alpha", "beta", "gamma"}}
+	if evalHasSecrets(t, env, "hasSecrets(params.body)", params) {
+		t.Error("hasSecrets(params.body) over a clean list should return false")
+	}
+}

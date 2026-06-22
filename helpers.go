@@ -45,8 +45,9 @@ func NewHTTPCall(method, host, path string) Call {
 // including the parsed request body under params.body. It behaves exactly like
 // NewHTTPCall (method is uppercased, path is expected to include a leading
 // slash, Context.Scope is left unset) but additionally exposes the body to
-// rules that inspect it (e.g. `params.body.model == 'gpt-4'` or
-// `hasSecrets(params.body.prompt)`).
+// rules that inspect it (e.g. `params.body.model == 'gpt-4'`, a scalar-field
+// scan `hasSecrets(params.body.prompt)`, or a whole-body scan
+// `hasSecrets(params.body)` which recurses over every string leaf).
 //
 // body is the decoded request body and may be any JSON-shaped value: an object
 // (map[string]any), an array ([]any), or a scalar. It is stored as-is, so a nil

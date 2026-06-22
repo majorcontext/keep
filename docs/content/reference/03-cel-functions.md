@@ -203,19 +203,23 @@ matchesDomain(context.user_id, ["example.com", "example.org"])
 ### `hasSecrets`
 
 ```text
-hasSecrets(field) -> bool
+hasSecrets(value) -> bool
 ```
 
-Returns `true` if the field contains patterns that look like secrets (API keys, tokens, passwords). Detection uses gitleaks pattern rules.
+Returns `true` if the value contains patterns that look like secrets (API keys, tokens, passwords). Detection uses gitleaks pattern rules.
+
+`value` may be a string, or a map/list (e.g. a whole request body). For maps and lists, every string leaf is scanned recursively (map values only — keys are treated as field names, not secret material); the function returns `true` if any leaf matches. Non-string scalars (numbers, booleans, null) never match.
 
 | Parameter | Type | Description |
 |-----------|------|-------------|
-| `field` | `string` | Text to scan |
+| `value` | `string` \| `map` \| `list` | Text, or an object/array whose string leaves are scanned recursively |
 
 **Example:**
 
 ```cel
-hasSecrets(params.message)
+hasSecrets(params.message)        // scan a single field
+hasSecrets(params.body)           // scan an entire JSON request body
+hasSecrets(params.body.headers)   // scan a nested object
 ```
 
 > **Note:** Pattern-based detection. It catches common secret formats but does not guarantee detection of all secrets, and false positives are possible.
