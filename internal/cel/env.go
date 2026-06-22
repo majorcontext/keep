@@ -268,12 +268,91 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 					return types.Bool(len(findings) > 0)
 				}),
 			),
+			// hasSecrets(map|list) bool — recurse over a JSON object/array (e.g. a
+			// request body) and report whether gitleaks detects a secret in ANY
+			// string leaf. Enables whole-body scans like hasSecrets(params.body)
+			// instead of forcing authors to enumerate every scalar field.
+			cel.Overload("hasSecrets_map",
+				[]*cel.Type{cel.MapType(cel.DynType, cel.DynType)},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					return types.Bool(detectSecretsInVal(cfg.secretDetector, val))
+				}),
+			),
+			cel.Overload("hasSecrets_list",
+				[]*cel.Type{cel.ListType(cel.DynType)},
+				cel.BoolType,
+				cel.UnaryBinding(func(val ref.Val) ref.Val {
+					return types.Bool(detectSecretsInVal(cfg.secretDetector, val))
+				}),
+			),
+			// Two-arg forms: the engine rewrites hasSecrets(params.body) to
+			// hasSecrets(params.body, _originalParams.body), so scan the
+			// original-case value (rhs) when usable, falling back to lhs.
+			cel.Overload("hasSecrets_map_dyn",
+				[]*cel.Type{cel.MapType(cel.DynType, cel.DynType), cel.DynType},
+				cel.BoolType,
+				cel.BinaryBinding(func(lhs, rhs ref.Val) ref.Val {
+					return types.Bool(detectSecretsInVal(cfg.secretDetector, preferOriginal(lhs, rhs)))
+				}),
+			),
+			cel.Overload("hasSecrets_list_dyn",
+				[]*cel.Type{cel.ListType(cel.DynType), cel.DynType},
+				cel.BoolType,
+				cel.BinaryBinding(func(lhs, rhs ref.Val) ref.Val {
+					return types.Bool(detectSecretsInVal(cfg.secretDetector, preferOriginal(lhs, rhs)))
+				}),
+			),
 		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("cel: create env: %w", err)
 	}
 	return &Env{env: env, cfg: cfg}, nil
+}
+
+// detectSecretsInVal recursively reports whether the secret detector finds a
+// secret in any string leaf of v. Strings are scanned directly; lists and maps
+// are walked (map values only — keys are field names, not secret material); all
+// other scalar types (numbers, bools, null) yield false. Backs the map/list
+// hasSecrets overloads so a whole-body scan like hasSecrets(params.body) works.
+func detectSecretsInVal(d *secrets.Detector, v ref.Val) bool {
+	if d == nil || v == nil {
+		return false
+	}
+	switch vv := v.(type) {
+	case types.String:
+		return len(d.Detect(string(vv))) > 0
+	case traits.Lister:
+		for it := vv.Iterator(); it.HasNext() == types.True; {
+			if detectSecretsInVal(d, it.Next()) {
+				return true
+			}
+		}
+		return false
+	case traits.Mapper:
+		for it := vv.Iterator(); it.HasNext() == types.True; {
+			if detectSecretsInVal(d, vv.Get(it.Next())) {
+				return true
+			}
+		}
+		return false
+	default:
+		return false
+	}
+}
+
+// preferOriginal returns the original-case value (rhs) when it is a string,
+// list, or map usable for secret detection, falling back to the lowered value
+// (lhs). The engine injects _originalParams.<field> as the second argument so
+// detection runs on pre-normalization text.
+func preferOriginal(lhs, rhs ref.Val) ref.Val {
+	switch rhs.(type) {
+	case types.String, traits.Lister, traits.Mapper:
+		return rhs
+	default:
+		return lhs
+	}
 }
 
 // Program is a compiled CEL expression ready for evaluation.
