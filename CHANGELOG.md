@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-06-22
+
 ### Added
 
 - **Whole-body `hasSecrets`** — `hasSecrets` now accepts a map or list in addition to a string, scanning every string leaf recursively (map values only — keys are field names). `hasSecrets(params.body)` now works over a parsed JSON request body instead of returning `false`; previously only a scalar field (`hasSecrets(params.body.token)`) was detected. Recursion uses the original-case value via the existing `_originalParams` rewrite, so case normalization does not weaken detection.
