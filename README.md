@@ -1,3 +1,5 @@
+# Keep
+
 ```text
 ██╗  ██╗███████╗███████╗██████╗ 
 ██║ ██╔╝██╔════╝██╔════╝██╔══██╗
@@ -15,8 +17,6 @@ Policy engine for AI agent tool calls: define declarative rules that deny, redac
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 > **Early release:** APIs and configuration may change.
-
-Policy engine for AI agent tool calls. Define declarative rules that deny, redact, or log structured API calls before they reach upstream services.
 
 Keep ships as a library for embedding in your own tooling, an LLM gateway for Claude Code, and an MCP relay. In each mode, agents connect to a single endpoint and every call is evaluated against your policy before it's forwarded.
 
