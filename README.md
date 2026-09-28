@@ -1,6 +1,20 @@
-# Keep
+```text
+██╗  ██╗███████╗███████╗██████╗ 
+██║ ██╔╝██╔════╝██╔════╝██╔══██╗
+█████╔╝ █████╗  █████╗  ██████╔╝
+██╔═██╗ ██╔══╝  ██╔══╝  ██╔═══╝ 
+██║  ██╗███████╗███████╗██║     
+╚═╝  ╚═╝╚══════╝╚══════╝╚═╝
+```
 
-> Early Release: This project is in active development. APIs and configuration formats may change.
+Policy engine for AI agent tool calls: define declarative rules that deny, redact, or log API calls before they reach upstream services.
+
+[![CI](https://github.com/majorcontext/keep/actions/workflows/ci.yml/badge.svg)](https://github.com/majorcontext/keep/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/majorcontext/keep.svg)](https://pkg.go.dev/github.com/majorcontext/keep)
+[![Release](https://img.shields.io/github/v/release/majorcontext/keep)](https://github.com/majorcontext/keep/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
+> **Early release:** APIs and configuration may change.
 
 Policy engine for AI agent tool calls. Define declarative rules that deny, redact, or log structured API calls before they reach upstream services.
 
@@ -303,6 +317,10 @@ See the language specification in [docs/plans/2026-03-17-language-spec.md](docs/
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, and architecture details.
 
-## License
+---
 
-MIT
+Part of [Major Context](https://majorcontext.com).
+
+[Moat](https://github.com/majorcontext/moat) · **Keep** · [Gatekeeper](https://github.com/majorcontext/gatekeeper) · [Bailey](https://github.com/majorcontext/bailey) · [Harness](https://github.com/majorcontext/harness)
+
+MIT licensed. See [LICENSE](LICENSE).
