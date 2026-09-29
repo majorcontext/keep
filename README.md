@@ -1,14 +1,5 @@
 # Keep
 
-```text
-██╗  ██╗███████╗███████╗██████╗ 
-██║ ██╔╝██╔════╝██╔════╝██╔══██╗
-█████╔╝ █████╗  █████╗  ██████╔╝
-██╔═██╗ ██╔══╝  ██╔══╝  ██╔═══╝ 
-██║  ██╗███████╗███████╗██║     
-╚═╝  ╚═╝╚══════╝╚══════╝╚═╝
-```
-
 Policy engine for AI agent tool calls: define declarative rules that deny, redact, or log API calls before they reach upstream services.
 
 [![CI](https://github.com/majorcontext/keep/actions/workflows/ci.yml/badge.svg)](https://github.com/majorcontext/keep/actions/workflows/ci.yml)
