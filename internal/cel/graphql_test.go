@@ -215,7 +215,7 @@ func TestParseGraphQLRequest_Subscription(t *testing.T) {
 
 func TestParseGraphQLRequest_StringEscapesDecoded(t *testing.T) {
 	// The server decodes escapes, so the policy must see the decoded value.
-	res := ParseGraphQLRequest(gqlBody(`mutation { createRef(input: {repositoryId: "R_ABC"}) }`, nil))
+	res := ParseGraphQLRequest(gqlBody(`mutation { createRef(input: {repositoryId: "\u0052_ABC"}) }`, nil))
 	mustValid(t, res)
 	input := fieldsOf(t, res, "mutations")[0]["args"].(map[string]any)["input"].(map[string]any)
 	if input["repositoryId"] != "R_ABC" {
@@ -385,6 +385,79 @@ func TestGraphQL_CEL_OriginalCase(t *testing.T) {
 	mismatch := map[string]any{"query": `mutation { deleteRef(input: {refId: "X"}) { clientMutationId } }`}
 	if v := originalGraphQLBody(refOf(lowered), refOf(mismatch)); !reflect.DeepEqual(refToNative(v), lowered) {
 		t.Errorf("originalGraphQLBody picked %v, want the first argument", refToNative(v))
+	}
+}
+
+func TestGraphQL_CEL_RewriteSyntax(t *testing.T) {
+	env, err := NewEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	original := gqlBody(`mutation($id: ID!) { createRef(input: {repositoryId: $id}) }`, map[string]any{"id": "R_AbCd"})
+	lowered := gqlBody(strings.ToLower(original["query"].(string)), map[string]any{"id": "r_abcd"})
+	for _, call := range []string{
+		`graphql(params.body)`,
+		`graphql (params.body)`,
+		"graphql\n(params.body)",
+		"graphql // graphql(fake)\n(params.body)",
+		"graphql(params.body // body comment\n)",
+		`graphql(params['body'])`,
+		`graphql(params.body[r'\' == '' ? 'missing' : 'self'])`,
+		`graphql(params.body['''a'b'c''' == '' ? 'missing' : 'self'])`,
+	} {
+		t.Run(call, func(t *testing.T) {
+			// A self entry lets argument expressions exercise the string scanner.
+			params := map[string]any{"body": map[string]any{"self": lowered}}
+			originalParams := map[string]any{"body": map[string]any{"self": original}}
+			if !strings.Contains(call, "'self'") {
+				params["body"], originalParams["body"] = lowered, original
+			}
+			for _, prefix := range []string{"", `r'\' != '' && `, `BR'\' != b'' && `, "// graphql(fake)\n"} {
+				expr := prefix + call + `.mutations.exists(m, m.name == 'createRef' && m.args.input.repositoryId == 'R_AbCd')`
+				prog, err := env.Compile(InjectOriginalParams(expr))
+				if err != nil {
+					t.Fatal(err)
+				}
+				got, err := prog.Eval(params, nil, originalParams)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !got {
+					t.Errorf("rewrite lost the original-case mutation name or variable: %s", expr)
+				}
+				got, err = prog.Eval(params, nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if got {
+					t.Errorf("lowercased mutation and variable matched: %s", expr)
+				}
+			}
+		})
+	}
+}
+
+func TestGraphQL_CEL_ComputedBodyUsesNormalizedVariables(t *testing.T) {
+	env, err := NewEnv()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Reconstructed bodies have no corresponding original params path. Their
+	// variables retain the scope's normalization, as documented.
+	expr := `graphql({'query': 'mutation($id: ID!) { createRef(id: $id) }', 'variables': params.body.variables}).mutations[0].args.id == 'r_abcd'`
+	prog, err := env.Compile(InjectOriginalParams(expr))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := prog.Eval(
+		map[string]any{"body": map[string]any{"variables": map[string]any{"id": "r_abcd"}}}, nil,
+		map[string]any{"body": map[string]any{"variables": map[string]any{"id": "R_AbCd"}}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got {
+		t.Error("expected the computed body's normalized variable value")
 	}
 }
 

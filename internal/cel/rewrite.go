@@ -31,42 +31,29 @@ func InjectOriginalParams(expr string) string {
 }
 
 func injectOriginalParamsForFunc(expr string, fnName string) string {
-	prefix := fnName + "("
 	result := expr
 	offset := 0
 
 	for {
-		idx := findCall(result, prefix, offset)
-		if idx < 0 {
+		start := findCallStart(result, fnName, offset)
+		if start < 0 {
 			break
 		}
-		start := idx + len(prefix) // position after opening paren
 
 		// Find the matching closing paren, respecting nesting and string literals.
 		depth := 1
 		commaFound := false
 		i := start
 		for i < len(result) && depth > 0 {
+			if end := skipCELLiteralOrComment(result, i); end > i {
+				i = end
+				continue
+			}
 			c := result[i]
 			switch {
-			case c == '\'' || c == '"':
-				// Skip string literal.
-				i++
-				for i < len(result) {
-					if result[i] == '\\' && i+1 < len(result) {
-						i += 2
-						continue
-					}
-					if result[i] == c {
-						i++
-						break
-					}
-					i++
-				}
-				continue
-			case c == '(':
+			case c == '(' || c == '[' || c == '{':
 				depth++
-			case c == ')':
+			case c == ')' || c == ']' || c == '}':
 				depth--
 			case c == ',' && depth == 1:
 				commaFound = true
@@ -91,9 +78,11 @@ func injectOriginalParamsForFunc(expr string, fnName string) string {
 			// injecting the full _originalParams map.
 			arg := result[start:closePos]
 			var inject string
-			if strings.HasPrefix(strings.TrimSpace(arg), "params.") {
-				trimmed := strings.TrimSpace(arg)
-				origArg := "_originalParams." + trimmed[len("params."):]
+			// Keep trailing newlines so a final line comment cannot swallow
+			// the injected argument's closing parenthesis.
+			trimmed := strings.TrimLeft(arg, " \t\r\n\f")
+			if strings.HasPrefix(trimmed, "params.") || strings.HasPrefix(trimmed, "params[") {
+				origArg := "_originalParams" + trimmed[len("params"):]
 				inject = ", " + origArg
 			} else {
 				inject = ", _originalParams"
@@ -109,42 +98,87 @@ func injectOriginalParamsForFunc(expr string, fnName string) string {
 	return result
 }
 
-// findCall returns the index of the next call site of prefix (e.g.
-// "graphql(") at or after from, or -1. Occurrences inside a string literal
+// findCallStart returns the position after the opening paren of the next global
+// function call at or after from, or -1. Whitespace before '(' is allowed.
+// Occurrences inside a string literal
 // (`'graphql(x)'`) or as the tail of a longer identifier or a method call
 // (`mygraphql(`, `x.graphql(`) are not call sites of the global function and
 // are skipped, so the rewrite never corrupts a literal or an unrelated call.
-func findCall(expr, prefix string, from int) int {
-	var quote byte
+func findCallStart(expr, fnName string, from int) int {
+	var previous byte
 	for i := 0; i < len(expr); i++ {
-		c := expr[i]
-		if quote != 0 {
-			switch c {
-			case '\\':
-				i++ // skip the escaped character
-			case quote:
-				quote = 0
+		if end := skipCELLiteralOrComment(expr, i); end > i {
+			if expr[i] != '/' {
+				previous = expr[i]
 			}
+			i = end - 1
 			continue
 		}
-		if c == '\'' || c == '"' {
-			quote = c
+		c := expr[i]
+		if isCELSpace(c) {
 			continue
 		}
-		if i < from || !strings.HasPrefix(expr[i:], prefix) {
-			continue
+		if i >= from && previous != '.' && (i == 0 || !isIdentPart(expr[i-1])) && strings.HasPrefix(expr[i:], fnName) {
+			j := i + len(fnName)
+			for j < len(expr) {
+				if isCELSpace(expr[j]) {
+					j++
+				} else if strings.HasPrefix(expr[j:], "//") {
+					j = skipCELLiteralOrComment(expr, j)
+				} else {
+					break
+				}
+			}
+			if j < len(expr) && expr[j] == '(' {
+				return j + 1
+			}
 		}
-		if i > 0 && isIdentOrDot(expr[i-1]) {
-			continue
-		}
-		return i
+		previous = c
 	}
 	return -1
 }
 
-func isIdentOrDot(c byte) bool {
-	return c == '_' || c == '.' ||
-		(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+func isCELSpace(c byte) bool {
+	return c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == '\f'
+}
+
+// skipCELLiteralOrComment returns the position after a quoted string/bytes
+// literal or line comment starting at i, or i otherwise. Raw literals don't
+// process escapes; triple-quoted literals can contain individual quote marks.
+func skipCELLiteralOrComment(expr string, i int) int {
+	if strings.HasPrefix(expr[i:], "//") {
+		if end := strings.IndexByte(expr[i:], '\n'); end >= 0 {
+			return i + end
+		}
+		return len(expr)
+	}
+	quote := i
+	if expr[quote] == 'b' || expr[quote] == 'B' {
+		quote++
+	}
+	raw := quote < len(expr) && (expr[quote] == 'r' || expr[quote] == 'R')
+	if raw {
+		quote++
+	}
+	if quote >= len(expr) || (expr[quote] != '\'' && expr[quote] != '"') {
+		return i
+	}
+	delimiter := expr[quote : quote+1]
+	if strings.HasPrefix(expr[quote:], strings.Repeat(delimiter, 3)) {
+		delimiter = strings.Repeat(delimiter, 3)
+	}
+	j := quote + len(delimiter)
+	for j < len(expr) {
+		if !raw && expr[j] == '\\' {
+			j += 2
+			continue
+		}
+		if strings.HasPrefix(expr[j:], delimiter) {
+			return j + len(delimiter)
+		}
+		j++
+	}
+	return len(expr)
 }
 
 // PrepareWhen turns a rule's `when` expression into the source that is

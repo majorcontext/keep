@@ -29,44 +29,14 @@ func ResolveAliases(expr string, aliases map[string]string) string {
 	for i < n {
 		c := expr[i]
 
-		// Handle single-quoted string literals.
-		if c == '\'' {
-			b.WriteByte(c)
-			i++
-			for i < n {
-				ch := expr[i]
-				b.WriteByte(ch)
-				i++
-				if ch == '\'' {
-					break
-				}
-				// simple escape: skip next char
-				if ch == '\\' && i < n {
-					b.WriteByte(expr[i])
-					i++
-				}
+		// Keep literals and comments intact, including raw and triple-quoted
+		// strings. This uses the same scanner as the original-case rewrite.
+		if end := skipCELLiteralOrComment(expr, i); end > i {
+			b.WriteString(expr[i:end])
+			if c != '/' {
+				prevNonIdent = expr[end-1]
 			}
-			prevNonIdent = '\''
-			continue
-		}
-
-		// Handle double-quoted string literals.
-		if c == '"' {
-			b.WriteByte(c)
-			i++
-			for i < n {
-				ch := expr[i]
-				b.WriteByte(ch)
-				i++
-				if ch == '"' {
-					break
-				}
-				if ch == '\\' && i < n {
-					b.WriteByte(expr[i])
-					i++
-				}
-			}
-			prevNonIdent = '"'
+			i = end
 			continue
 		}
 

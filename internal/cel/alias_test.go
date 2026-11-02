@@ -4,6 +4,17 @@ import (
 	"testing"
 )
 
+func TestResolveAliases_LiteralsAndComments(t *testing.T) {
+	aliases := map[string]string{"id": "params.id", "r": "params.r", "b": "params.b"}
+	for _, literal := range []string{`r'\'`, `R"\"`, `br'\'`, `BR"\"`, `'''a'id'b'''`, `"""a"id"b"""`, `'escaped\'id'`} {
+		expr := literal + " == " + literal + " && id == 'x' // id\n"
+		want := literal + " == " + literal + " && params.id == 'x' // id\n"
+		if got := ResolveAliases(expr, aliases); got != want {
+			t.Errorf("ResolveAliases(%q) = %q, want %q", expr, got, want)
+		}
+	}
+}
+
 func TestResolveAliases_Simple(t *testing.T) {
 	aliases := map[string]string{
 		"priority": "params.priority",
