@@ -5,6 +5,7 @@ go 1.25
 require (
 	github.com/google/cel-go v0.27.0
 	github.com/spf13/cobra v1.10.2
+	github.com/vektah/gqlparser/v2 v2.5.64
 	github.com/zricethezav/gitleaks/v8 v8.30.1
 	gopkg.in/yaml.v3 v3.0.1
 )

@@ -135,7 +135,7 @@ when: "params.name == 'Bash'"
 
 Operation names are also lowered, so glob patterns and operation literals should use lowercase.
 
-**What is preserved:** Secret detection (`hasSecrets` and `redact.secrets`) and regex redaction patterns operate on original-case values. Gitleaks patterns like `AKIA[0-9A-Z]{16}` require exact case to match, so the engine threads original params to these functions automatically. Audit trail entries also preserve original operation names and parameter values.
+**What is preserved:** Secret detection (`hasSecrets` and `redact.secrets`), GraphQL parsing (`graphql`), and regex redaction patterns operate on original-case values. Gitleaks patterns like `AKIA[0-9A-Z]{16}` require exact case to match, so the engine threads original params to these functions automatically. Audit trail entries also preserve original operation names and parameter values.
 
 **Opting out:** Set `case_sensitive: true` at the scope level to disable normalization entirely. In this mode, `params.name == 'Bash'` only matches exactly `"Bash"`. Use this for scopes where exact-case matching is required (e.g., credential vaults, case-sensitive file paths).
 

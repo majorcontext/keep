@@ -223,3 +223,67 @@ hasSecrets(params.body.headers)   // scan a nested object
 ```
 
 > **Note:** Pattern-based detection. It catches common secret formats but does not guarantee detection of all secrets, and false positives are possible.
+
+## Request parsing
+
+### `graphql`
+
+```text
+graphql(body) -> map
+```
+
+Parses a GraphQL-over-HTTP request body -- the decoded JSON object `{"query": ..., "variables": ..., "operationName": ...}` -- and returns its operations and root fields. Use it to write rules against GraphQL APIs, where every request is a `POST` to one endpoint and the operation lives in the body.
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `body` | `dyn` | The decoded request body, typically `params.body` |
+
+The result is a map:
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `valid` | `bool` | `false` if the body is not a JSON object, `query` is missing or not a string, `variables` is not an object, the document does not parse, or a fragment is unknown, cyclic, or expands past the limits below |
+| `error` | `string` | Why the body is invalid; `""` when `valid` is `true` |
+| `operations` | `list(map)` | One entry per operation: `{type, name, fields}`. `type` is `"query"`, `"mutation"`, or `"subscription"`; `name` is `""` for an anonymous operation |
+| `queries` | `list(map)` | Root fields of every query operation |
+| `mutations` | `list(map)` | Root fields of every mutation operation |
+| `subscriptions` | `list(map)` | Root fields of every subscription operation |
+
+Each field is `{name, alias, args}`. `alias` is `""` when the field has none. `args` maps argument names to values with variables substituted.
+
+**Example:**
+
+```yaml
+- name: no-issue-deletion
+  match:
+    operation: "post api.linear.app/graphql"
+    when: "graphql(params.body).mutations.exists(m, m.name == 'issueDelete')"
+  action: deny
+  message: "Deleting issues is not permitted."
+
+- name: unparseable-graphql
+  match:
+    operation: "post api.linear.app/graphql"
+    when: "!graphql(params.body).valid"
+  action: deny
+  message: "GraphQL request could not be parsed."
+```
+
+```cel
+graphql(params.body).mutations.exists(m,
+  has(m.args.input) && has(m.args.input.repositoryId) &&
+  !(m.args.input.repositoryId in ["R_kgDOAbCd"]))
+```
+
+Semantics:
+
+- **Every operation is reported.** `operationName` is ignored, so a mutation is visible to rules even when the client asks the server to run a different operation from the same document.
+- **Root fragments are expanded.** Fragment spreads and inline fragments in an operation's root selection set are flattened into its fields. Type conditions and directives are ignored -- a field marked `@skip(if: true)` is still reported.
+- **Aliases do not hide fields.** `name` is the field's real name; `alias` is reported separately.
+- **Variables are substituted.** A variable takes its value from `variables` (an explicit `null` counts as a value), then from its default in the operation's variable definitions. A variable with neither is omitted from an object argument and becomes `null` inside a list. Variables nested in object and list literals are substituted too.
+- **Literal values** become strings, ints, doubles, booleans, or `null`. Enum values become strings. String escapes are decoded. An integer outside the 64-bit range is kept as its literal text.
+- **Original case.** GraphQL names and node IDs are case-sensitive, so `graphql(params.body)` parses the body as the client sent it, even when the scope lowercases params for matching (the default). Compare names and values with their exact case, or wrap them in `lower()`.
+- **Limits.** Documents over 100,000 tokens, fragment nesting deeper than 32 levels, or more than 1,000 expanded root fields are invalid.
+- **Never errors.** Invalid input returns `valid: false` with empty lists, so `.exists()` over `mutations` is always safe. Pair content rules with a `!graphql(params.body).valid` deny rule so an unparseable body fails closed.
+
+> **Note:** `graphql` reads `params.body`, so the scope requires the request body. Pin GraphQL rules to the endpoint with `operation` (as above) so a gatekeeper using `Engine.RequiresBodyFor` buffers bodies only for that endpoint. See [Inspecting the request body](../guides/06-go-library.md#inspecting-the-request-body).

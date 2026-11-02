@@ -31,6 +31,7 @@ var ReservedNames = map[string]bool{
 	"matchesDomain":  true,
 	"dayOfWeek":      true,
 	"hasSecrets":     true,
+	"graphql":        true,
 
 	// CEL type identifiers
 	"int":       true,
