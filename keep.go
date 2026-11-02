@@ -181,6 +181,29 @@ func (e *Engine) RequiresBody(scope string) bool {
 	return ev.RequiresBody()
 }
 
+// RequiresBodyFor reports whether evaluating call in the given scope needs the
+// request body (params.body). It narrows RequiresBody by operation: a rule that
+// references params.body only counts when its `operation` glob matches
+// call.Operation (normalized the way Evaluate normalizes it), and a body rule
+// with no operation counts for every call.
+//
+// Gatekeepers should prefer it over RequiresBody so that pinning a body rule to
+// an operation — e.g. `operation: "post api.github.com/graphql"` — buffers and
+// parses bodies only for matching requests, leaving other requests in the scope
+// (including ones with non-JSON bodies) untouched. Build call the same way it
+// will be evaluated, without a body (e.g. NewHTTPCall).
+//
+// Like RequiresBody it fails safe: an unknown scope returns true.
+func (e *Engine) RequiresBodyFor(scope string, call Call) bool {
+	e.mu.RLock()
+	ev, ok := e.evaluators[scope]
+	e.mu.RUnlock()
+	if !ok {
+		return true
+	}
+	return ev.RequiresBodyFor(call.Operation)
+}
+
 // Scopes returns the sorted list of loaded scope names.
 func (e *Engine) Scopes() []string {
 	e.mu.RLock()
@@ -254,7 +277,10 @@ func ValidateRuleBytes(data []byte) error {
 	}
 	for _, rule := range rf.Rules {
 		if rule.Match.When != "" {
-			if _, err := celEnv.Compile(rule.Match.When); err != nil {
+			// Prepare the expression exactly as the engine does at load time
+			// (defs substituted, original params injected) so a file that
+			// LoadFromBytes accepts also validates.
+			if _, err := celEnv.Compile(keepcel.PrepareWhen(rule.Match.When, nil, rf.Defs)); err != nil {
 				return fmt.Errorf("keep: rule %q: invalid CEL expression: %w", rule.Name, err)
 			}
 		}

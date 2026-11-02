@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`graphql()` CEL function** — parses a GraphQL-over-HTTP request body (`graphql(params.body)`) into `{valid, error, operations, queries, mutations, subscriptions}`. Each root field reports its real `name`, its `alias`, and `args` with variables and variable defaults substituted. Every operation in the document is reported regardless of `operationName`, root fragment spreads and inline fragments are expanded, and directives are ignored, so a rule sees every root field the document contains. The body is parsed in its original case even in case-insensitive scopes, since GraphQL names and node IDs are case-sensitive. Malformed input returns `valid: false` with empty lists rather than an error.
+- **`Engine.RequiresBodyFor(scope, call)`** — narrows `RequiresBody` by operation: a rule that reads `params.body` counts only when its `operation` glob matches the call. Pinning a body rule to one endpoint (for example `operation: "post api.github.com/graphql"`) lets a gatekeeper buffer bodies for that endpoint alone instead of making every request in the scope JSON-only. An unknown scope returns `true`.
+
+### Fixed
+
+- Fix `ValidateRuleBytes` rejecting rule files that use `defs` — previously it compiled each `when` expression without substituting defs, so a file that `LoadFromBytes` accepted failed validation with "undeclared reference". Validation now prepares expressions exactly as the engine does.
+- Fix the original-case rewrite for `hasSecrets` — previously `hasSecrets(` inside a string literal or at the end of a longer identifier was rewritten too, corrupting the literal.
+
 ## [0.6.0] - 2026-06-22
 
 ### Added

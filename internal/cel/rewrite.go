@@ -13,6 +13,7 @@ import "strings"
 //  3. Add a test case in rewrite_test.go.
 var originalParamsFunctions = []string{
 	"hasSecrets",
+	"graphql",
 }
 
 // InjectOriginalParams rewrites CEL expressions so that single-argument
@@ -35,11 +36,11 @@ func injectOriginalParamsForFunc(expr string, fnName string) string {
 	offset := 0
 
 	for {
-		idx := strings.Index(result[offset:], prefix)
+		idx := findCall(result, prefix, offset)
 		if idx < 0 {
 			break
 		}
-		start := offset + idx + len(prefix) // position after opening paren
+		start := idx + len(prefix) // position after opening paren
 
 		// Find the matching closing paren, respecting nesting and string literals.
 		depth := 1
@@ -106,4 +107,53 @@ func injectOriginalParamsForFunc(expr string, fnName string) string {
 	}
 
 	return result
+}
+
+// findCall returns the index of the next call site of prefix (e.g.
+// "graphql(") at or after from, or -1. Occurrences inside a string literal
+// (`'graphql(x)'`) or as the tail of a longer identifier or a method call
+// (`mygraphql(`, `x.graphql(`) are not call sites of the global function and
+// are skipped, so the rewrite never corrupts a literal or an unrelated call.
+func findCall(expr, prefix string, from int) int {
+	var quote byte
+	for i := 0; i < len(expr); i++ {
+		c := expr[i]
+		if quote != 0 {
+			switch c {
+			case '\\':
+				i++ // skip the escaped character
+			case quote:
+				quote = 0
+			}
+			continue
+		}
+		if c == '\'' || c == '"' {
+			quote = c
+			continue
+		}
+		if i < from || !strings.HasPrefix(expr[i:], prefix) {
+			continue
+		}
+		if i > 0 && isIdentOrDot(expr[i-1]) {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
+func isIdentOrDot(c byte) bool {
+	return c == '_' || c == '.' ||
+		(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
+}
+
+// PrepareWhen turns a rule's `when` expression into the source that is
+// compiled: profile aliases and defs are substituted, then original-case
+// params are injected for the functions that need them. The engine and
+// rule-file validation both use it, so an expression validates exactly when
+// it compiles at load time.
+func PrepareWhen(expr string, aliases, defs map[string]string) string {
+	resolved := ResolveAliases(expr, aliases)
+	resolved = ResolveAliases(resolved, defs)
+	return InjectOriginalParams(resolved)
 }

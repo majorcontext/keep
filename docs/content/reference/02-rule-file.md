@@ -139,7 +139,7 @@ Def names and profile alias names must not use any of the following identifiers:
 |----------|-------|
 | Top-level variables | `params`, `context`, `now` |
 | CEL standard functions | `size`, `has`, `matches`, `startsWith`, `endsWith`, `contains`, `exists`, `all`, `filter`, `exists_one` |
-| Keep custom functions | `containsAny`, `estimateTokens`, `inTimeWindow`, `rateCount`, `lower`, `upper`, `matchesDomain`, `dayOfWeek`, `hasSecrets` |
+| Keep custom functions | `containsAny`, `estimateTokens`, `inTimeWindow`, `rateCount`, `lower`, `upper`, `matchesDomain`, `dayOfWeek`, `hasSecrets`, `graphql` |
 | CEL type identifiers | `int`, `uint`, `double`, `bool`, `string`, `bytes`, `list`, `map`, `type`, `null_type` |
 | Literal keywords | `true`, `false`, `null` |
 

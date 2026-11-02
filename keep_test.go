@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -770,6 +771,45 @@ rules:
 	}
 }
 
+// TestValidateRuleBytes_Defs is the regression for a rule file that uses defs:
+// LoadFromBytes substitutes them before compiling, but ValidateRuleBytes used
+// to compile the raw expression and reject the file with "undeclared
+// reference" — so a policy that loads fine failed validation.
+func TestValidateRuleBytes_Defs(t *testing.T) {
+	data := []byte(`
+scope: test
+mode: enforce
+defs:
+  blocked: '["delete_issue", "close_issue"]'
+rules:
+  - name: block-listed
+    match:
+      when: "params.op in blocked"
+    action: deny
+`)
+	if _, err := keep.LoadFromBytes(data); err != nil {
+		t.Fatalf("LoadFromBytes() = %v, want nil", err)
+	}
+	if err := keep.ValidateRuleBytes(data); err != nil {
+		t.Errorf("ValidateRuleBytes() = %v, want nil (LoadFromBytes accepts this file)", err)
+	}
+
+	// Companion: a reference to a def that does not exist is still rejected.
+	missing := []byte(`
+scope: test
+defs:
+  blocked: '["delete_issue"]'
+rules:
+  - name: block-listed
+    match:
+      when: "params.op in not_defined"
+    action: deny
+`)
+	if err := keep.ValidateRuleBytes(missing); err == nil {
+		t.Error("ValidateRuleBytes() = nil, want error for an undefined identifier")
+	}
+}
+
 func TestValidateRuleBytes_Empty(t *testing.T) {
 	err := keep.ValidateRuleBytes(nil)
 	if err == nil {
@@ -1028,5 +1068,107 @@ func TestRuleSet_EmptyCompiles(t *testing.T) {
 	}
 	if result.Decision != keep.Allow {
 		t.Errorf("Decision = %q, want allow", result.Decision)
+	}
+}
+
+// githubGraphQLPolicy pins a graphql() body rule to the GitHub GraphQL endpoint
+// alongside a path-only rule, the shape a gatekeeper policy takes when it must
+// inspect GraphQL bodies without buffering git smart-HTTP traffic.
+const githubGraphQLPolicy = `
+scope: http
+mode: enforce
+defs:
+  allowed_repo_ids: '["R_kgDOAbCd"]'
+rules:
+  - name: graphql-invalid
+    match:
+      operation: "post api.github.com/graphql"
+      when: "!graphql(params.body).valid"
+    action: deny
+    message: "Unparseable GraphQL request."
+  - name: graphql-repo
+    match:
+      operation: "post api.github.com/graphql"
+      when: >
+        graphql(params.body).mutations.exists(m,
+          has(m.args.input) && has(m.args.input.repositoryId) &&
+          !(m.args.input.repositoryId in allowed_repo_ids))
+    action: deny
+    message: "Mutation targets a repository outside the allowlist."
+  - name: no-delete
+    match:
+      when: "params.method == 'delete'"
+    action: deny
+`
+
+func TestRequiresBodyFor(t *testing.T) {
+	eng, err := keep.LoadFromBytes([]byte(githubGraphQLPolicy))
+	if err != nil {
+		t.Fatalf("LoadFromBytes: %v", err)
+	}
+	defer eng.Close()
+
+	if !eng.RequiresBody("http") {
+		t.Fatal("RequiresBody(http) = false, want true (graphql(params.body) reads the body)")
+	}
+	if !eng.RequiresBodyFor("http", keep.NewHTTPCall("POST", "api.github.com", "/graphql")) {
+		t.Error("RequiresBodyFor(graphql) = false, want true")
+	}
+	// Companion: git smart-HTTP to github.com must not need a body, or a
+	// gatekeeper would fail closed on its non-JSON pack payload.
+	if eng.RequiresBodyFor("http", keep.NewHTTPCall("POST", "github.com", "/o/r.git/git-receive-pack")) {
+		t.Error("RequiresBodyFor(git-receive-pack) = true, want false")
+	}
+	if !eng.RequiresBodyFor("does-not-exist", keep.NewHTTPCall("GET", "example.com", "/")) {
+		t.Error("RequiresBodyFor(unknown scope) = false, want true (fail-safe)")
+	}
+}
+
+func TestGraphQLPolicy_EndToEnd(t *testing.T) {
+	for _, caseSensitive := range []bool{false, true} {
+		policy := githubGraphQLPolicy
+		if caseSensitive {
+			policy = strings.Replace(policy, "mode: enforce", "mode: enforce\ncase_sensitive: true", 1)
+			policy = strings.ReplaceAll(policy, `operation: "post api.github.com/graphql"`, `operation: "POST api.github.com/graphql"`)
+		}
+		eng, err := keep.LoadFromBytes([]byte(policy))
+		if err != nil {
+			t.Fatalf("LoadFromBytes(case_sensitive=%v): %v", caseSensitive, err)
+		}
+
+		mutation := func(repoID string) keep.Call {
+			return keep.NewHTTPCallWithBody("POST", "api.github.com", "/graphql", map[string]any{
+				"query":     "mutation($input: CreatePullRequestInput!) { createPullRequest(input: $input) { clientMutationId } }",
+				"variables": map[string]any{"input": map[string]any{"repositoryId": repoID}},
+			})
+		}
+
+		cases := []struct {
+			name string
+			call keep.Call
+			want keep.Decision
+		}{
+			// Mixed-case node ID only matches when the original case is parsed,
+			// including in the default case-insensitive scope.
+			{"allowed repo", mutation("R_kgDOAbCd"), keep.Allow},
+			{"other repo", mutation("R_kgDOZzZz"), keep.Deny},
+			{"lowercased allowed id is a different id", mutation("r_kgdoabcd"), keep.Deny},
+			{"query", keep.NewHTTPCallWithBody("POST", "api.github.com", "/graphql",
+				map[string]any{"query": "{ viewer { login } }"}), keep.Allow},
+			{"unparseable", keep.NewHTTPCallWithBody("POST", "api.github.com", "/graphql",
+				map[string]any{"query": "mutation {"}), keep.Deny},
+			{"batched array body", keep.NewHTTPCallWithBody("POST", "api.github.com", "/graphql",
+				[]any{map[string]any{"query": "{ viewer { login } }"}}), keep.Deny},
+		}
+		for _, c := range cases {
+			res, err := eng.Evaluate(context.Background(), c.call, "http")
+			if err != nil {
+				t.Fatalf("case_sensitive=%v %s: Evaluate: %v", caseSensitive, c.name, err)
+			}
+			if res.Decision != c.want {
+				t.Errorf("case_sensitive=%v %s: decision = %s (rule %q), want %s", caseSensitive, c.name, res.Decision, res.Rule, c.want)
+			}
+		}
+		eng.Close()
 	}
 }

@@ -132,6 +132,10 @@ type Evaluator struct {
 	caseSensitive bool
 	judgeFunc     JudgeHandler
 	requiresBody  bool // precomputed: any rule references params.body
+	// bodyRuleOps holds the operation glob of every rule that references
+	// params.body ("" for a rule with no operation, which matches every call).
+	// Precomputed so RequiresBodyFor is a short glob scan per request.
+	bodyRuleOps []string
 }
 
 // SetJudgeFunc sets the judge handler for this evaluator.
@@ -153,14 +157,47 @@ func (ev *Evaluator) RequiresBody() bool {
 	return ev.requiresBody
 }
 
-// computeRequiresBody reports whether any compiled rule references params.body.
-func computeRequiresBody(rules []compiledRule) bool {
-	for _, cr := range rules {
-		if cr.program.ReferencesParam(ParamBody) {
+// RequiresBodyFor reports whether evaluating a call with the given operation
+// needs the request body. It narrows RequiresBody by each body rule's
+// operation glob: a rule that references params.body only counts when its
+// operation matches (a body rule with no operation counts for every call).
+// The operation is normalized exactly as Evaluate normalizes it, so a pinned
+// rule like `operation: "post api.example.com/graphql"` matches regardless of
+// the case the caller used for method or host.
+//
+// Gatekeepers use this to buffer bodies only for the requests a body rule can
+// actually inspect, instead of every request in the scope.
+func (ev *Evaluator) RequiresBodyFor(operation string) bool {
+	if !ev.requiresBody {
+		return false
+	}
+	op := operation
+	if !ev.caseSensitive {
+		op = strings.ToLower(op)
+	}
+	for _, pattern := range ev.bodyRuleOps {
+		if GlobMatch(pattern, op) {
 			return true
 		}
 	}
 	return false
+}
+
+// computeRequiresBody reports whether any compiled rule references params.body.
+func computeRequiresBody(rules []compiledRule) bool {
+	return len(bodyRuleOperations(rules)) > 0
+}
+
+// bodyRuleOperations returns the operation glob of every compiled rule that
+// references params.body.
+func bodyRuleOperations(rules []compiledRule) []string {
+	var ops []string
+	for _, cr := range rules {
+		if cr.program.ReferencesParam(ParamBody) {
+			ops = append(ops, cr.rule.Match.Operation)
+		}
+	}
+	return ops
 }
 
 // NewEvaluator creates an evaluator for a scope. Compiles all CEL expressions
@@ -182,11 +219,10 @@ func NewEvaluator(
 		cr := compiledRule{rule: r}
 
 		if r.Match.When != "" {
-			resolved := keepcel.ResolveAliases(r.Match.When, aliases)
-			resolved = keepcel.ResolveAliases(resolved, defs)
-			// Rewrite hasSecrets(params.X) → hasSecrets(params.X, _originalParams.X)
-			// so the binary overload receives the original-case field value.
-			resolved = keepcel.InjectOriginalParams(resolved)
+			// Substitutes aliases and defs, then rewrites hasSecrets(params.X) →
+			// hasSecrets(params.X, _originalParams.X) so the binary overload
+			// receives the original-case field value.
+			resolved := keepcel.PrepareWhen(r.Match.When, aliases, defs)
 			prog, err := celEnv.Compile(resolved)
 			if err != nil {
 				return nil, fmt.Errorf("rule %q: compile when: %w", r.Name, err)
@@ -227,6 +263,7 @@ func NewEvaluator(
 		secrets:       detector,
 		caseSensitive: caseSensitive,
 		requiresBody:  computeRequiresBody(compiled),
+		bodyRuleOps:   bodyRuleOperations(compiled),
 	}, nil
 }
 

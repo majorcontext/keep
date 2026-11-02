@@ -304,6 +304,28 @@ func NewEnv(opts ...EnvOption) (*Env, error) {
 				}),
 			),
 		),
+
+		// graphql(body) map — parse a GraphQL-over-HTTP request body into its
+		// operations and root fields (see ParseGraphQLRequest). Never errors:
+		// malformed input returns {valid: false, ...} with empty lists.
+		cel.Function("graphql",
+			cel.Overload("graphql_dyn",
+				[]*cel.Type{cel.DynType},
+				cel.MapType(cel.StringType, cel.DynType),
+				cel.UnaryBinding(graphqlVal),
+			),
+			// graphql(loweredBody, originalBody) — the engine rewrites
+			// graphql(params.body) to graphql(params.body, _originalParams.body)
+			// so the case-sensitive GraphQL document (and node IDs) are parsed
+			// as the client sent them, not as case normalization lowered them.
+			cel.Overload("graphql_dyn_dyn",
+				[]*cel.Type{cel.DynType, cel.DynType},
+				cel.MapType(cel.StringType, cel.DynType),
+				cel.BinaryBinding(func(lhs, rhs ref.Val) ref.Val {
+					return graphqlVal(originalGraphQLBody(lhs, rhs))
+				}),
+			),
+		),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("cel: create env: %w", err)

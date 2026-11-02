@@ -94,3 +94,62 @@ func TestEvaluator_RequiresBody_ViaAlias(t *testing.T) {
 		t.Error("RequiresBody() = false, want true (body reference via alias)")
 	}
 }
+
+func TestEvaluator_RequiresBodyFor(t *testing.T) {
+	const graphqlOp = "POST api.github.com/graphql"
+	const pushOp = "POST github.com/o/r.git/git-receive-pack"
+
+	pinned := []config.Rule{
+		{Name: "path-only", Action: config.ActionDeny, Match: config.Match{When: "params.path.startsWith('/admin')"}},
+		{Name: "gql", Action: config.ActionDeny, Match: config.Match{
+			Operation: "post api.github.com/graphql",
+			When:      "graphql(params.body).mutations.exists(m, m.name == 'deleteRef')",
+		}},
+	}
+	unpinned := []config.Rule{
+		{Name: "secrets", Action: config.ActionDeny, Match: config.Match{When: "hasSecrets(params.body)"}},
+	}
+	noBody := []config.Rule{
+		{Name: "method", Action: config.ActionDeny, Match: config.Match{Operation: "post *", When: "params.method == 'POST'"}},
+	}
+
+	tests := []struct {
+		name          string
+		rules         []config.Rule
+		caseSensitive bool
+		op            string
+		want          bool
+	}{
+		{"pinned rule matches its operation", pinned, false, graphqlOp, true},
+		{"pinned rule matches mixed-case method and host", pinned, false, "post API.GitHub.com/graphql", true},
+		{"pinned rule skips other operations", pinned, false, pushOp, false},
+		{"pinned rule skips other paths on the same host", pinned, false, "POST api.github.com/repos/o/r/pulls", false},
+		{"unpinned body rule applies to every call", unpinned, false, pushOp, true},
+		{"unpinned body rule applies to graphql too", unpinned, false, graphqlOp, true},
+		{"no body rules", noBody, false, graphqlOp, false},
+		{"case-sensitive scope matches exact case", []config.Rule{{Name: "gql", Action: config.ActionDeny, Match: config.Match{
+			Operation: "POST api.github.com/graphql", When: "graphql(params.body).valid == false"}}}, true, graphqlOp, true},
+		{"case-sensitive scope does not fold case", []config.Rule{{Name: "gql", Action: config.ActionDeny, Match: config.Match{
+			Operation: "POST api.github.com/graphql", When: "graphql(params.body).valid == false"}}}, true, "post api.github.com/graphql", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			env, err := keepcel.NewEnv()
+			if err != nil {
+				t.Fatal(err)
+			}
+			ev, err := NewEvaluator(env, "http", config.ModeEnforce, config.ErrorModeClosed, tt.rules, nil, nil, nil, tt.caseSensitive)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := ev.RequiresBodyFor(tt.op); got != tt.want {
+				t.Errorf("RequiresBodyFor(%q) = %v, want %v", tt.op, got, tt.want)
+			}
+			// RequiresBodyFor never answers true where the scope-wide
+			// RequiresBody says no body rule exists.
+			if !ev.RequiresBody() && ev.RequiresBodyFor(tt.op) {
+				t.Error("RequiresBodyFor true while RequiresBody false")
+			}
+		})
+	}
+}

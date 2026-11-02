@@ -49,6 +49,11 @@ func TestInjectOriginalParams(t *testing.T) {
 			want: `hasSecrets(params.text, _originalParams.text) && params.x == "foo(bar)"`,
 		},
 		{
+			name: "call text inside a string literal is not rewritten",
+			in:   `params.x == 'hasSecrets(y)' && hasSecrets(params.text)`,
+			want: `params.x == 'hasSecrets(y)' && hasSecrets(params.text, _originalParams.text)`,
+		},
+		{
 			name: "empty expression",
 			in:   "",
 			want: "",

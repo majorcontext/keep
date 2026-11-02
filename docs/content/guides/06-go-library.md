@@ -124,6 +124,25 @@ func middleware(engine *keep.Engine, scope string) http.HandlerFunc {
 
 `RequiresBody` fails safe: it detects every idiomatic body reference (`params.body.x`, `params["body"]`, `has(params.body)`, comprehensions, the `in` operator), and for any unrecognized use of the `params` map -- or an unknown scope name -- it returns `true` so the body is buffered rather than silently skipped.
 
+`RequiresBody` answers for the whole scope: one body rule makes every request in the scope need its body. When a body rule only applies to one endpoint, pin it with `operation` and call `Engine.RequiresBodyFor(scope, call)` instead. It counts a body rule only when the rule's `operation` glob matches the call (a body rule without `operation` still counts for every call), so other requests in the scope -- including ones with non-JSON bodies -- are never buffered:
+
+```yaml
+- name: no-issue-deletion
+  match:
+    operation: "post api.linear.app/graphql"
+    when: "graphql(params.body).mutations.exists(m, m.name == 'issueDelete')"
+  action: deny
+```
+
+```go
+probe := keep.NewHTTPCall(r.Method, r.Host, r.URL.Path) // same operation, no body
+if engine.RequiresBodyFor(scope, probe) {
+    // buffer and decode the body as above
+}
+```
+
+The operation is normalized the same way `Evaluate` normalizes it, so `POST API.Linear.app/graphql` matches the lowercase pattern in a case-insensitive scope. Like `RequiresBody`, it returns `true` for an unknown scope.
+
 ## Handle decisions
 
 `result.Decision` is one of three values:
