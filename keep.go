@@ -277,7 +277,10 @@ func ValidateRuleBytes(data []byte) error {
 	}
 	for _, rule := range rf.Rules {
 		if rule.Match.When != "" {
-			if _, err := celEnv.Compile(rule.Match.When); err != nil {
+			// Prepare the expression exactly as the engine does at load time
+			// (defs substituted, original params injected) so a file that
+			// LoadFromBytes accepts also validates.
+			if _, err := celEnv.Compile(keepcel.PrepareWhen(rule.Match.When, nil, rf.Defs)); err != nil {
 				return fmt.Errorf("keep: rule %q: invalid CEL expression: %w", rule.Name, err)
 			}
 		}

@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fix `ValidateRuleBytes` rejecting rule files that use `defs` — previously it compiled each `when` expression without substituting defs, so a file that `LoadFromBytes` accepted failed validation with "undeclared reference". Validation now prepares expressions exactly as the engine does.
 - Fix the original-case rewrite for `hasSecrets` — previously `hasSecrets(` inside a string literal or at the end of a longer identifier was rewritten too, corrupting the literal.
 
 ## [0.6.0] - 2026-06-22

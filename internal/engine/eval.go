@@ -219,11 +219,10 @@ func NewEvaluator(
 		cr := compiledRule{rule: r}
 
 		if r.Match.When != "" {
-			resolved := keepcel.ResolveAliases(r.Match.When, aliases)
-			resolved = keepcel.ResolveAliases(resolved, defs)
-			// Rewrite hasSecrets(params.X) → hasSecrets(params.X, _originalParams.X)
-			// so the binary overload receives the original-case field value.
-			resolved = keepcel.InjectOriginalParams(resolved)
+			// Substitutes aliases and defs, then rewrites hasSecrets(params.X) →
+			// hasSecrets(params.X, _originalParams.X) so the binary overload
+			// receives the original-case field value.
+			resolved := keepcel.PrepareWhen(r.Match.When, aliases, defs)
 			prog, err := celEnv.Compile(resolved)
 			if err != nil {
 				return nil, fmt.Errorf("rule %q: compile when: %w", r.Name, err)

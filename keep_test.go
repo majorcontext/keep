@@ -771,6 +771,45 @@ rules:
 	}
 }
 
+// TestValidateRuleBytes_Defs is the regression for a rule file that uses defs:
+// LoadFromBytes substitutes them before compiling, but ValidateRuleBytes used
+// to compile the raw expression and reject the file with "undeclared
+// reference" — so a policy that loads fine failed validation.
+func TestValidateRuleBytes_Defs(t *testing.T) {
+	data := []byte(`
+scope: test
+mode: enforce
+defs:
+  blocked: '["delete_issue", "close_issue"]'
+rules:
+  - name: block-listed
+    match:
+      when: "params.op in blocked"
+    action: deny
+`)
+	if _, err := keep.LoadFromBytes(data); err != nil {
+		t.Fatalf("LoadFromBytes() = %v, want nil", err)
+	}
+	if err := keep.ValidateRuleBytes(data); err != nil {
+		t.Errorf("ValidateRuleBytes() = %v, want nil (LoadFromBytes accepts this file)", err)
+	}
+
+	// Companion: a reference to a def that does not exist is still rejected.
+	missing := []byte(`
+scope: test
+defs:
+  blocked: '["delete_issue"]'
+rules:
+  - name: block-listed
+    match:
+      when: "params.op in not_defined"
+    action: deny
+`)
+	if err := keep.ValidateRuleBytes(missing); err == nil {
+		t.Error("ValidateRuleBytes() = nil, want error for an undefined identifier")
+	}
+}
+
 func TestValidateRuleBytes_Empty(t *testing.T) {
 	err := keep.ValidateRuleBytes(nil)
 	if err == nil {

@@ -146,3 +146,14 @@ func isIdentOrDot(c byte) bool {
 	return c == '_' || c == '.' ||
 		(c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')
 }
+
+// PrepareWhen turns a rule's `when` expression into the source that is
+// compiled: profile aliases and defs are substituted, then original-case
+// params are injected for the functions that need them. The engine and
+// rule-file validation both use it, so an expression validates exactly when
+// it compiles at load time.
+func PrepareWhen(expr string, aliases, defs map[string]string) string {
+	resolved := ResolveAliases(expr, aliases)
+	resolved = ResolveAliases(resolved, defs)
+	return InjectOriginalParams(resolved)
+}
